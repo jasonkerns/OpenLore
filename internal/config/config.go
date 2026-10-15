@@ -889,8 +889,11 @@ func New(opts ...Option) (Config, error) {
 		cfg.Experimental = append(cfg.Experimental, strings.Split(value, ",")...)
 	}
 
-	if cfg.Port < 1 || cfg.Port > 65535 {
-		return Config{}, fmt.Errorf("port must be between 1 and 65535 (SSH cannot be disabled), got %d", cfg.Port)
+	if cfg.Port < 0 || cfg.Port > 65535 {
+		return Config{}, fmt.Errorf("port must be between 0 (SSH off) and 65535, got %d", cfg.Port)
+	}
+	if cfg.Port == 0 && cfg.HTTPPort == 0 {
+		return Config{}, errors.New("port and http_port can't both be 0: nothing would be served")
 	}
 	for _, p := range []struct {
 		name string

@@ -28,9 +28,11 @@ func mountedOAuthServer(t *testing.T) (*Server, *httptest.Server) {
 
 // TestOAuthRoutes_DiscoveryToTokenRoundTrip drives the exact sequence an
 // OAuth-native MCP client follows: discover metadata → register (DCR) →
-// authorize (public choice) → exchange the code for a token, all over HTTP.
+// authorize (login) → exchange the code for a token, all over HTTP. The login
+// ceremony and consent screen are covered elsewhere; they end in
+// finishAuthorize, which this test calls directly.
 func TestOAuthRoutes_DiscoveryToTokenRoundTrip(t *testing.T) {
-	_, ts := mountedOAuthServer(t)
+	s, ts := mountedOAuthServer(t)
 
 	// 1. Discover protected-resource + AS metadata.
 	prm := getJSON(t, ts.URL+protectedResourceMetadataPath)
@@ -65,23 +67,26 @@ func TestOAuthRoutes_DiscoveryToTokenRoundTrip(t *testing.T) {
 		"code_challenge_method": {"S256"},
 	}.Encode()
 	body := getString(t, authzURL)
-	m := regexp.MustCompile(`name="authz" value="([^"]+)"`).FindStringSubmatch(body)
+	m := regexp.MustCompile(`data-authz="([^"]+)"`).FindStringSubmatch(body)
 	if m == nil {
-		t.Fatalf("no authz id on choice page: %s", body)
+		t.Fatalf("no authz id on login page: %s", body)
 	}
 	authz := m[1]
 
-	// 4. POST /authorize/public → 302 back to redirect_uri?code=&state=.
+	// 4. There's no public-access shortcut; a login completes the request.
 	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	resp, err := client.PostForm(ts.URL+authorizePublicPath, url.Values{"authz": {authz}})
-	if err != nil {
-		t.Fatalf("public post: %v", err)
+	if resp, err := client.PostForm(ts.URL+"/authorize/public", url.Values{"authz": {authz}}); err == nil {
+		resp.Body.Close()
+		if resp.StatusCode == http.StatusFound {
+			t.Fatal("POST /authorize/public still completes the flow")
+		}
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusFound {
-		t.Fatalf("public choice status = %d, want 302", resp.StatusCode)
+	// (A logged-in user then sees the consent screen; finishAuthorize is what it completes with.)
+	redirectURL, ok := s.finishAuthorize(authz, "alice", "")
+	if !ok {
+		t.Fatal("finishAuthorize failed")
 	}
-	loc, _ := url.Parse(resp.Header.Get("Location"))
+	loc, _ := url.Parse(redirectURL)
 	if loc.Query().Get("state") != "st8" {
 		t.Errorf("state = %q, want st8", loc.Query().Get("state"))
 	}
@@ -129,7 +134,7 @@ func TestOAuthRoutes_TokenExchangeRejectsWrongClientID(t *testing.T) {
 		"code_challenge":        {challenge},
 		"code_challenge_method": {"S256"},
 	}.Encode())
-	authz := regexp.MustCompile(`name="authz" value="([^"]+)"`).FindStringSubmatch(body)[1]
+	authz := regexp.MustCompile(`data-authz="([^"]+)"`).FindStringSubmatch(body)[1]
 	redirectURL, ok := s.CompleteAuthorize(authz, anonymousSubject)
 	if !ok {
 		t.Fatal("CompleteAuthorize failed")

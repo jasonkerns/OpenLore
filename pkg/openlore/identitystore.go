@@ -139,13 +139,10 @@ func (d serverIdentityStore) Resolve(_ context.Context, claims Claims) (Identity
 func (s *Server) resolveClaims(claims Claims) (Identity, error) {
 	sub := claims.Subject
 
-	// A public/anonymous token resolves to the same read-only guest identity a
-	// tokenless caller gets (§8.4).
+	// Anonymous access was removed: a token with no subject, or one minted for
+	// the reserved public subject (by an older build), names no one.
 	if sub == "" || sub == anonymousSubject {
-		id := s.anonymousIdentity()
-		id.Scopes = []string{claims.Scope}
-		id.Principal = AuthenticatedPrincipal{Subject: sub, IdentityName: "guest", Source: "token", Claims: claims.Raw, Scope: claims.Scope}
-		return id, nil
+		return Identity{}, ErrUnknownIdentity
 	}
 
 	name, matched := s.matchRule(sub)
@@ -156,14 +153,8 @@ func (s *Server) resolveClaims(claims Claims) (Identity, error) {
 		}
 	}
 	if !matched {
-		if s.config.UnknownIdentity == "deny" {
-			return Identity{}, ErrUnknownIdentity
-		}
-		// Posture allows unknowns: land in the read-only default lore.
-		id := s.anonymousIdentity()
-		id.Principal = AuthenticatedPrincipal{Subject: sub, IdentityName: "guest", Source: "token", Claims: claims.Raw, Scope: claims.Scope}
-		id.Scopes = []string{claims.Scope}
-		return id, nil
+		// Unknown subjects are always refused, whatever unknown_identity says.
+		return Identity{}, ErrUnknownIdentity
 	}
 
 	id, ok := s.identityForName(name)

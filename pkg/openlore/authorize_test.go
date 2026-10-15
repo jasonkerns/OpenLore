@@ -3,6 +3,7 @@ package openlore
 import (
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -21,8 +22,8 @@ func pkcePair() (verifier, challenge string) {
 	return
 }
 
-// authzIDRe extracts the hidden authz request id from the rendered choice page.
-var authzIDRe = regexp.MustCompile(`name="authz" value="([^"]+)"`)
+// authzIDRe extracts the pending authz request id from the rendered login page.
+var authzIDRe = regexp.MustCompile(`data-authz="([^"]+)"`)
 
 // runAuthorize drives GET /authorize and returns the authz request id extracted
 // from the rendered public-vs-login choice page.
@@ -57,9 +58,9 @@ func TestAuthorize_RendersChoicePageWithRequestID(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	// The public-access form is always present (login works for everyone, §8.4).
-	if !strings.Contains(body, `action="`+authorizePublicPath+`"`) {
-		t.Errorf("choice page missing public-access form; body=%s", body)
+	// Anonymous access was removed: the page never offers to continue without a login.
+	if strings.Contains(strings.ToLower(body), "public access") || strings.Contains(body, "/authorize/public") {
+		t.Errorf("login page still offers public access; body=%s", body)
 	}
 	if authz == "" {
 		t.Fatal("no authz request id on choice page")
@@ -98,64 +99,21 @@ func TestAuthorize_RejectsDifferentResourcePath(t *testing.T) {
 	}
 }
 
-// TestAuthorize_PublicChoiceMintsAnonymousToken exercises the "continue with
-// public access" button: POST /authorize/public → redirect with code → token
-// exchange yields an anonymous, read-only token (§8.4).
-func TestAuthorize_PublicChoiceMintsAnonymousToken(t *testing.T) {
+// TestAuthorize_NoPublicAccess pins that this build has no way to finish the
+// OAuth flow without logging in: the /authorize/public route is gone, and a
+// token minted for the reserved anonymous subject (by an older build) is
+// refused rather than resolved to a guest.
+func TestAuthorize_NoPublicAccess(t *testing.T) {
 	s := newTokenTestServer(t, true, "allow")
-	verifier, challenge := pkcePair()
-	redirectURI := "http://127.0.0.1:52123/callback"
-
-	_, authz := runAuthorize(t, s, url.Values{
-		"response_type":         {"code"},
-		"redirect_uri":          {redirectURI},
-		"state":                 {"pub"},
-		"code_challenge":        {challenge},
-		"code_challenge_method": {"S256"},
-	})
-	if authz == "" {
-		t.Fatal("no authz id")
+	if _, ok := s.oauthRoutes()["/authorize/public"]; ok {
+		t.Fatal("/authorize/public is still mounted")
 	}
-
-	form := url.Values{"authz": {authz}}
-	req := httptest.NewRequest(http.MethodPost, authorizePublicPath, strings.NewReader(form.Encode()))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	rec := httptest.NewRecorder()
-	s.authorizePublicHandler(rec, req)
-	if rec.Code != http.StatusFound {
-		t.Fatalf("public choice status = %d, want 302; body=%s", rec.Code, rec.Body.String())
-	}
-	u, _ := url.Parse(rec.Header().Get("Location"))
-	if !strings.HasPrefix(rec.Header().Get("Location"), redirectURI) {
-		t.Fatalf("redirect = %q, want prefix %q", rec.Header().Get("Location"), redirectURI)
-	}
-	if u.Query().Get("state") != "pub" {
-		t.Errorf("state = %q, want pub", u.Query().Get("state"))
-	}
-	code := u.Query().Get("code")
-	if code == "" {
-		t.Fatal("no code in redirect")
-	}
-
-	_, resp := postForm(t, s.tokens, url.Values{
-		"grant_type":    {"authorization_code"},
-		"code":          {code},
-		"code_verifier": {verifier},
-		"redirect_uri":  {redirectURI},
-	})
-	claims, err := s.issuer.Verify(resp.AccessToken)
+	claims, err := s.issuer.Verify(mint(t, s, anonymousSubject, ScopeFull))
 	if err != nil {
 		t.Fatalf("verify: %v", err)
 	}
-	if claims.Subject != anonymousSubject {
-		t.Errorf("sub = %q, want %q", claims.Subject, anonymousSubject)
-	}
-	id, err := s.resolveClaims(claims)
-	if err != nil {
-		t.Fatalf("resolveClaims: %v", err)
-	}
-	if id.IdentityName != "guest" || id.Principal.IdentityName != "guest" {
-		t.Errorf("public token resolved to %+v, want guest principal", id)
+	if _, err := s.resolveClaims(claims); !errors.Is(err, ErrUnknownIdentity) {
+		t.Fatalf("anonymous token resolved (err = %v), want ErrUnknownIdentity", err)
 	}
 }
 

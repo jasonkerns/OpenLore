@@ -67,7 +67,6 @@ func writeTestConfig(t *testing.T, body string) string {
 // instead of silently replaced by the default.
 func TestExplicitZeroIsNotTreatedAsOmitted(t *testing.T) {
 	for _, tc := range []struct{ yaml, key string }{
-		{"port: 0\n", "port"},
 		{"max_jobs: 0\n", "max_jobs"},
 		{"analytics:\n  pipeline:\n    buffer: 0\n", "analytics.pipeline.buffer"},
 		{"analytics:\n  index:\n    workers: -1\n", "analytics.index.workers"},
@@ -91,12 +90,18 @@ func TestExplicitZeroIsNotTreatedAsOmitted(t *testing.T) {
 }
 
 func TestPortRangesValidated(t *testing.T) {
-	for _, opt := range []Option{WithPort(0), WithPort(70000), WithMetricsPort(-1), WithHTTPPort(65536)} {
+	for _, opt := range []Option{WithPort(-1), WithPort(70000), WithMetricsPort(-1), WithHTTPPort(65536)} {
 		if _, err := New(opt); err == nil {
 			t.Error("expected out-of-range port to be rejected")
 		}
 	}
 	if _, err := New(WithMetricsPort(0), WithHTTPPort(0)); err != nil {
 		t.Fatalf("0 must disable metrics and HTTP: %v", err)
+	}
+	if cfg, err := New(WithPort(0)); err != nil || cfg.Port != 0 {
+		t.Fatalf("port 0 must turn SSH off: port=%d err=%v", cfg.Port, err)
+	}
+	if _, err := New(WithPort(0), WithHTTPPort(0)); err == nil {
+		t.Fatal("SSH and HTTP both off must be rejected")
 	}
 }

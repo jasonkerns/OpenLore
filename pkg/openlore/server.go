@@ -56,10 +56,12 @@ type Server struct {
 	// as knowledge-backend that does its own scoping): callers get full access.
 	// When true, an access-control policy was loaded and identity scoping is
 	// enforced (docsets filtered, anonymous is read-only).
-	auth         *config.AuthConfig
-	authMu       sync.RWMutex
-	runtimeAuth  atomic.Pointer[config.AuthConfig]
-	authEnforced bool
+	auth   *config.AuthConfig
+	authMu sync.RWMutex
+	// authWatchStop ends the lore.json watcher (auth_watch.go).
+	authWatchStop chan struct{}
+	runtimeAuth   atomic.Pointer[config.AuthConfig]
+	authEnforced  bool
 	// grants is the registry of grant types (ro/rw + plugin-contributed like
 	// publish). A grant name in lore.json with no registered type fails startup.
 	grants             *grantRegistry
@@ -1889,8 +1891,17 @@ func (s *Server) ListenAndServe() error {
 		}
 	}
 
-	s.logger.Info("SSH server starting", "port", s.config.Port)
 	s.startHistoryMaintenance()
+	s.startAuthWatch()
+	if s.config.Port == 0 {
+		// SSH off: serve HTTP only, until it stops or fails.
+		s.logger.Info("SSH is off")
+		if s.httpSrv == nil {
+			return errors.New("SSH is off and there is no HTTP server to run")
+		}
+		return <-s.httpSrv.Done()
+	}
+	s.logger.Info("SSH server starting", "port", s.config.Port)
 	return s.srv.ListenAndServe()
 }
 
@@ -1945,6 +1956,7 @@ func (s *Server) metricsExportHandler() http.Handler {
 
 // Shutdown gracefully shuts down the server.
 func (s *Server) Shutdown(ctx context.Context) error {
+	s.stopAuthWatch()
 	if s.passkeys != nil {
 		s.passkeys.Shutdown()
 	}

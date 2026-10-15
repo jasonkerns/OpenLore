@@ -18,7 +18,7 @@ import (
 
 // authorizeRequest holds the validated parameters of an in-flight OAuth
 // authorization-code request (RFC 6749 §4.1 + PKCE RFC 7636), created at
-// GET /authorize and consumed once the login ceremony (or public-access choice)
+// GET /authorize and consumed once the login ceremony
 // completes.
 type authorizeRequest struct {
 	ClientID            string
@@ -114,11 +114,11 @@ func (a *authorizeStore) take(id string) (authorizeRequest, bool) {
 }
 
 // authorizeHandler serves GET /authorize: it validates the OAuth parameters,
-// stashes the request, and renders the public-vs-login choice screen (§8.4).
-// "Continue with public access" POSTs to /authorize/public (mints an anonymous
-// code); "Log in with passkey" navigates into the passkey ceremony (?authz=<id>).
-// Either path ends in a redirect back to redirect_uri?code=&state= — the
-// "normal OAuth" callback flow (docs/mcp-bearer-auth.md §8.2, §8.4).
+// stashes the request, and renders the login screen. "Log in with passkey"
+// navigates into the passkey ceremony (?authz=<id>), which ends in a redirect back
+// to redirect_uri?code=&state= — the "normal OAuth" callback flow
+// (docs/mcp-bearer-auth.md §8.2). There is no public-access option: this build
+// never issues a code without a login.
 func (s *Server) authorizeHandler(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	if q.Get("response_type") != "code" {
@@ -207,47 +207,20 @@ func sameResourceIdentifier(a, b string) bool {
 	return ap == bp
 }
 
-// authorizePublicHandler serves POST /authorize/public: the "continue with
-// public access" choice (§8.4). It finalizes the pending request as the reserved
-// anonymous subject and redirects back to the client's callback with a code that
-// exchanges into a read-only default-lore token — so an OAuth-native client
-// (Claude) completes the flow without logging in.
-func (s *Server) authorizePublicHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "POST required", http.StatusMethodNotAllowed)
-		return
-	}
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, "malformed form", http.StatusBadRequest)
-		return
-	}
-	authz := r.Form.Get("authz")
-	redirectURL, ok := s.CompleteAuthorize(authz, anonymousSubject)
-	if !ok {
-		http.Error(w, "authorization request expired — restart the flow", http.StatusBadRequest)
-		return
-	}
-	http.Redirect(w, r, redirectURL, http.StatusFound)
-}
-
-// authorizeChoiceTmpl is the public-vs-login screen. The login button navigates
-// to the passkey ceremony; the public button POSTs to /authorize/public. When
-// passkeys are disabled only the public option is offered so OAuth still
-// completes.
+// authorizeChoiceTmpl is the login screen. Anonymous ("public access") sign-in
+// was removed, so without passkeys there is no way to complete the flow and the
+// page says so instead of offering a guest token.
 var authorizeChoiceTmpl = template.Must(template.New("authorize").Parse(`<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Connect — OpenLore</title>
 ` + webstyle.Link + `</head>
-<body class="centered"><div class="card">
+<body class="centered"><div class="card" data-authz="{{.Authz}}">
   <div class="brand">OpenLore<span class="brand-slash" aria-hidden="true">/</span></div>
   <h1>Connect</h1>
-  <p class="subtitle">How do you want to connect?</p>
-  {{if .Passkeys}}<a class="btn" href="{{.LoginURL}}">Log in with passkey</a>{{end}}
-  <form method="post" action="{{.PublicPath}}">
-    <input type="hidden" name="authz" value="{{.Authz}}">
-    <button type="submit"{{if .Passkeys}} class="secondary-btn"{{end}}>Continue with public access</button>
-  </form>
+  {{if .Passkeys}}<p class="subtitle">Log in to continue.</p>
+  <a class="btn" href="{{.LoginURL}}">Log in with passkey</a>
+  {{else}}<p class="subtitle">This server has no browser login set up. Ask its owner for access.</p>{{end}}
 </div></body></html>`))
 
 func (s *Server) renderAuthorizeChoice(w http.ResponseWriter, authz string) {
@@ -258,15 +231,13 @@ func (s *Server) renderAuthorizeChoice(w http.ResponseWriter, authz string) {
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	authorizeChoiceTmpl.Execute(w, struct {
-		Authz      string
-		LoginURL   string
-		PublicPath string
-		Passkeys   bool
+		Authz    string
+		LoginURL string
+		Passkeys bool
 	}{
-		Authz:      authz,
-		LoginURL:   loginURL.String(),
-		PublicPath: authorizePublicPath,
-		Passkeys:   s.passkeys != nil,
+		Authz:    authz,
+		LoginURL: loginURL.String(),
+		Passkeys: s.passkeys != nil,
 	})
 }
 

@@ -37,6 +37,7 @@ type Config struct {
 type Server struct {
 	srv    *http.Server
 	config Config
+	done   chan error
 }
 
 // New creates a new HTTP server serving the given filesystem.
@@ -81,7 +82,7 @@ func New(fsys fs.FS, cfg Config) (*Server, error) {
 		return nil, fmt.Errorf("mTLS requires OpenLore TLS termination")
 	}
 
-	return &Server{srv: srv, config: cfg}, nil
+	return &Server{srv: srv, config: cfg, done: make(chan error, 1)}, nil
 }
 
 // siteHandler serves the replaceable static website while allowing it to own
@@ -152,18 +153,27 @@ func (s *Server) Start() {
 	}
 
 	go func() {
+		var err error
 		if s.config.TLSCert != "" && s.config.TLSKey != "" {
 			logger.Info("HTTP server starting (TLS)", "port", s.config.Port)
-			if err := s.srv.ListenAndServeTLS(s.config.TLSCert, s.config.TLSKey); err != nil && err != http.ErrServerClosed {
-				logger.Error("HTTP server error", "error", err)
-			}
+			err = s.srv.ListenAndServeTLS(s.config.TLSCert, s.config.TLSKey)
 		} else {
 			logger.Info("HTTP server starting", "port", s.config.Port)
-			if err := s.srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-				logger.Error("HTTP server error", "error", err)
-			}
+			err = s.srv.ListenAndServe()
 		}
+		if err == http.ErrServerClosed {
+			err = nil
+		} else if err != nil {
+			logger.Error("HTTP server error", "error", err)
+		}
+		s.done <- err
 	}()
+}
+
+// Done receives once the server stops: nil after Shutdown, or the error that
+// stopped it (such as the port being in use).
+func (s *Server) Done() <-chan error {
+	return s.done
 }
 
 // Shutdown gracefully shuts down the HTTP server.

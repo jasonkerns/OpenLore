@@ -2,6 +2,7 @@
 *.db
 
 # Built binaries
+/bin/
 /openlore
 /lix
 /dist/

@@ -194,7 +194,9 @@ func TestAuthMiddleware_UnknownSubDenyIs403(t *testing.T) {
 	}
 }
 
-func TestAuthMiddleware_AnonymousTokenResolvesToDefault(t *testing.T) {
+// Anonymous access was removed: a token for the reserved anonymous subject is
+// refused, even where tokens are optional.
+func TestAuthMiddleware_AnonymousTokenIsRefused(t *testing.T) {
 	s := newTokenTestServer(t, true, "allow")
 	h := s.authMiddleware(s.identityEcho(), false)
 
@@ -203,7 +205,7 @@ func TestAuthMiddleware_AnonymousTokenResolvesToDefault(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
-	if got := rec.Body.String(); got != "guest public:ro" {
-		t.Fatalf("public token body = %q, want %q", got, "guest public:ro")
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body=%s", rec.Code, rec.Body.String())
 	}
 }

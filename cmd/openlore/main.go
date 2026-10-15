@@ -312,6 +312,16 @@ func runRoleCommand(args []string, out io.Writer) error {
 }
 
 func main() {
+	// `mcp` and `mcpb` serve a directory over stdio with no login at all, so this
+	// build doesn't offer them (see locked.go). Their code is left in place to keep
+	// merges from upstream simple.
+	if len(os.Args) > 1 && (os.Args[1] == "mcp" || os.Args[1] == "mcpb") {
+		fmt.Fprintf(os.Stderr, "error: `openlore %s` is not available in this build: it serves docs without a login. Use MCP over HTTP with a token.\n", os.Args[1])
+		os.Exit(1)
+	}
+	if len(os.Args) > 1 && os.Args[1] == "tls" {
+		os.Exit(runTLS(os.Args[2:], os.Stdout, os.Stderr))
+	}
 	// Handle subcommands before flag parsing
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
@@ -539,6 +549,7 @@ func main() {
 			case "mint":
 				tokCmd := flag.NewFlagSet("token mint", flag.ExitOnError)
 				identity := tokCmd.String("identity", "", "identity name = token `sub` (required)")
+				actor := tokCmd.String("actor", "", "identity acting for --identity (must be one of its delegates); recorded as the token's `act`")
 				scope := tokCmd.String("scope", openlore.ScopeFull, "token scope")
 				ttl := tokCmd.Duration("ttl", time.Hour, "access token lifetime")
 				configPath := tokCmd.String("config", "./openlore.yml", "path to openlore.yml (holds the tokens block + data dir)")
@@ -558,13 +569,13 @@ func main() {
 					fmt.Fprintf(os.Stderr, "error: %v\n", err)
 					os.Exit(1)
 				}
-				token, exp, err := issuer.Mint(openlore.Attribution{Principal: *identity}, *scope, *ttl)
+				token, exp, err := issuer.Mint(openlore.Attribution{Principal: *identity, Actor: *actor}, *scope, *ttl)
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "error: minting token: %v\n", err)
 					os.Exit(1)
 				}
 				fmt.Println(token)
-				fmt.Fprintf(os.Stderr, "sub=%s scope=%s expires=%s\n", *identity, *scope, exp.Format(time.RFC3339))
+				fmt.Fprintf(os.Stderr, "sub=%s act=%s scope=%s expires=%s\n", *identity, *actor, *scope, exp.Format(time.RFC3339))
 				os.Exit(0)
 
 			case "verify":
@@ -731,6 +742,10 @@ func main() {
 		fmt.Fprintf(os.Stderr, "error: invalid config: %v\n", err)
 		os.Exit(1)
 	}
+	if err := requireNoAnonymous(resolved); err != nil {
+		fmt.Fprintf(os.Stderr, "error: refusing to start: %v\n", err)
+		os.Exit(1)
+	}
 	level := slog.LevelInfo
 	if resolved.Debug {
 		level = slog.LevelDebug
@@ -779,7 +794,11 @@ func main() {
 		fmt.Printf("  Directory:  (embedded docs)\n")
 	}
 	fmt.Printf("  config: %s\n", cfg.Source())
-	fmt.Printf("  SSH:        ssh %s\n", cfg.LocalSSHTarget())
+	if cfg.Port > 0 {
+		fmt.Printf("  SSH:        ssh %s\n", cfg.LocalSSHTarget())
+	} else {
+		fmt.Printf("  SSH:        off\n")
+	}
 	if cfg.MetricsPort > 0 {
 		fmt.Printf("  Metrics:    http://localhost:%d/metrics\n", cfg.MetricsPort)
 	}

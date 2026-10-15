@@ -16,13 +16,12 @@ const (
 	tokenPath                     = "/oauth/token"
 	revocationPath                = "/oauth/revoke"
 	authorizePath                 = "/authorize"
-	authorizePublicPath           = "/authorize/public"
 	authorizeConsentPath          = "/authorize/consent"
 )
 
 // oauthRoutes returns the OAuth endpoints mounted whenever token auth is
 // configured: the mint step (token + JWKS), the browser-driven authorization
-// flow (authorize + public choice), Dynamic Client Registration, and the RFC
+// flow (authorize, then passkey login), Dynamic Client Registration, and the RFC
 // 9728/8414 discovery documents. Discovery/registration/authorize are mounted
 // regardless of keyless posture so OAuth-native clients can always find the flow
 // (docs/mcp-bearer-auth.md §4, §8.4). None of these are wrapped in
@@ -33,7 +32,6 @@ func (s *Server) oauthRoutes() map[string]http.Handler {
 		revocationPath:                http.HandlerFunc(s.tokens.revoke),
 		jwksPath:                      jwksHandler(s.issuer),
 		authorizePath:                 http.HandlerFunc(s.authorizeHandler),
-		authorizePublicPath:           http.HandlerFunc(s.authorizePublicHandler),
 		authorizeConsentPath:          http.HandlerFunc(s.authorizeConsentHandler),
 		registrationPath:              http.HandlerFunc(s.registrationHandler),
 		protectedResourceMetadataPath: http.HandlerFunc(s.resourceMetadata),

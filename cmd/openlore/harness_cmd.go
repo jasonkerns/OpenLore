@@ -141,6 +141,13 @@ func harnessInit(args []string, stdout, stderr io.Writer) int {
 }
 
 func printSetupCode(configPath string, ttl time.Duration, stdout, stderr io.Writer) int {
+	// config.New quietly falls back to defaults when the file is missing, which
+	// would surface as a confusing "auth_file is required".
+	if _, err := os.Stat(configPath); err != nil {
+		abs, _ := filepath.Abs(configPath)
+		fmt.Fprintf(stderr, "error: no config at %s (pass --config with the path to the server's openlore.yml)\n", abs)
+		return 1
+	}
 	cfg, err := config.New(config.WithConfigFile(configPath))
 	if err != nil {
 		fmt.Fprintf(stderr, "error: loading %s: %v\n", configPath, err)

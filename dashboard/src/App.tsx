@@ -14,12 +14,12 @@ import { FuzzyFinder, finderShortcut, isFinderShortcut } from "./FuzzyFinder";
 import { useAsync } from "./hooks";
 import {
   CloseIcon,
+  CollapseIcon,
   CopyIcon,
   FileIcon,
   FolderIcon,
   InfoIcon,
   LinkIcon,
-  MenuIcon,
   RefreshIcon,
   SearchIcon,
   SettingsIcon,
@@ -373,14 +373,52 @@ function Workspace({ session }: { session: Session }) {
   };
   return (
     <div className={`app ${view}${collapsed ? " tree-collapsed" : ""}`}>
-      <header className="topbar">
-        <button
-          className="tree-toggle"
-          aria-label={collapsed ? "Expand tree" : "Collapse tree"}
-          onClick={() => setCollapsed(!collapsed)}
+      <div className="side">
+        <div className="side-head flex h-11 items-center gap-2 px-3">
+          {collapsed ? (
+            <button
+              className="mx-auto rounded-md border-0 p-0 hover:opacity-80"
+              aria-label="Expand tree"
+              title="Expand sidebar"
+              onClick={() => setCollapsed(false)}
+            >
+              <img src={logo} alt="" width={28} height={28} />
+            </button>
+          ) : (
+            <>
+              <img src={logo} alt="" width={24} height={24} />
+              <span className="truncate text-base font-light tracking-tight text-zinc-100">
+                OpenLore
+              </span>
+              <button
+                className="tree-toggle ml-auto"
+                aria-label="Collapse tree"
+                title="Collapse sidebar"
+                onClick={() => setCollapsed(true)}
+              >
+                <CollapseIcon />
+              </button>
+            </>
+          )}
+        </div>
+        {!collapsed && <Tree {...treeProps} />}
+        <div
+          className={`side-foot mt-auto flex items-center gap-1.5 px-3 py-2 text-xs text-zinc-500 ${collapsed ? "flex-col" : ""}`}
         >
-          <MenuIcon />
-        </button>
+          <span
+            className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400"
+            title={`Signed in as ${session.identity}`}
+          />
+          {!collapsed && (
+            <span className="identity min-w-0 flex-1 truncate">
+              {session.identity}
+            </span>
+          )}
+          <ThemeToggle />
+        </div>
+      </div>
+      <div className="pane">
+      <header className="topbar">
         <div className="brand">
           <img src={logo} alt="" width={24} height={24} />
           <span>OpenLore</span>
@@ -416,10 +454,10 @@ function Workspace({ session }: { session: Session }) {
           <span>Find</span>
           <kbd aria-hidden="true">{finderShortcut}</kbd>
         </button>
-        <span className="identity">{session.identity}</span>
-        <ThemeToggle />
+        <span className="mobile-only">
+          <ThemeToggle />
+        </span>
       </header>
-      {!collapsed && <Tree {...treeProps} />}
       <main className="workspace">
         {routeError ? (
           <div className="state error" role="alert">
@@ -579,6 +617,7 @@ function Workspace({ session }: { session: Session }) {
           </>
         )}
       </main>
+      </div>
       <nav className="mobile-nav" aria-label="Mobile workspace">
         <button aria-haspopup="dialog" onClick={() => setSheet("folders")}>
           <FolderIcon /> <span>Folders</span>

@@ -15,6 +15,7 @@ import {
   Link,
   Moon,
   PanelLeft,
+  PanelLeftClose,
   RefreshCw,
   Search,
   Settings,
@@ -47,6 +48,7 @@ export const CodeIcon = () => <Icon of={Code} />;
 export const ShieldIcon = () => <Icon of={Shield} />;
 export const SettingsIcon = () => <Icon of={Settings} />;
 export const MenuIcon = () => <Icon of={PanelLeft} />;
+export const CollapseIcon = () => <Icon of={PanelLeftClose} />;
 export const CloseIcon = () => <Icon of={X} />;
 export const RefreshIcon = () => <Icon of={RefreshCw} />;
 export const InfoIcon = () => <Icon of={Info} />;

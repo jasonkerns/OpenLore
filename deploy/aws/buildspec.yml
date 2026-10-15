@@ -1,0 +1,16 @@
+# AWS CodeBuild: builds deploy/aws/Dockerfile and pushes it to ECR.
+# Project settings: source = this repository (branch agent-harness), privileged mode on (for Docker),
+# environment variable ECR_REPOSITORY = <account>.dkr.ecr.<region>.amazonaws.com/openlore.
+version: 0.2
+phases:
+  pre_build:
+    commands:
+      - aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS --password-stdin "${ECR_REPOSITORY%%/*}"
+      - TAG="$(echo "$CODEBUILD_RESOLVED_SOURCE_VERSION" | cut -c1-12)"
+  build:
+    commands:
+      - docker build -f deploy/aws/Dockerfile -t "$ECR_REPOSITORY:$TAG" -t "$ECR_REPOSITORY:latest" .
+  post_build:
+    commands:
+      - docker push "$ECR_REPOSITORY:$TAG"
+      - docker push "$ECR_REPOSITORY:latest"

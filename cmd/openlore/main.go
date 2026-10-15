@@ -319,6 +319,9 @@ func main() {
 		fmt.Fprintf(os.Stderr, "error: `openlore %s` is not available in this build: it serves docs without a login. Use MCP over HTTP with a token.\n", os.Args[1])
 		os.Exit(1)
 	}
+	if len(os.Args) > 1 && os.Args[1] == "harness" {
+		os.Exit(runHarness(os.Args[2:], os.Stdout, os.Stderr))
+	}
 	if len(os.Args) > 1 && os.Args[1] == "tls" {
 		os.Exit(runTLS(os.Args[2:], os.Stdout, os.Stderr))
 	}

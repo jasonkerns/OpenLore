@@ -54,6 +54,10 @@ const passkeyHelp = `
 // registration link printed to the agent.
 func RegisterShellCommand(pk *Passkeys, baseURL string) {
 	baseURL = strings.TrimRight(baseURL, "/")
+	// Agent Harness: registering a passkey for an identity grants a browser
+	// session as that identity, so it is an admin action, not a read. Without
+	// this any shell user could register a passkey for any identity.
+	cmds.RegisterAction("passkey", cmds.ActionAdmin)
 	cmds.Register("passkey", func(ctx cmds.CmdContext, args []string, w io.Writer, errW io.Writer, stdin io.Reader) int {
 		if len(args) == 0 {
 			fmt.Fprint(w, passkeyHelp)
@@ -109,13 +113,12 @@ func (pk *Passkeys) cmdRegister(baseURL string, args []string, w io.Writer, errW
 		return 1
 	}
 
-	pr, err := pk.pending.Create(identity, name)
+	url, err := pk.RegistrationLink(baseURL, identity, name)
 	if err != nil {
 		fmt.Fprintf(errW, "passkey: %s\n", err)
 		return 1
 	}
 
-	url := fmt.Sprintf("%s/passkey/r/%s", baseURL, pr.Token)
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "  📱 Passkey Registration")
 	fmt.Fprintln(w, "  ─────────────────────────")
@@ -128,6 +131,19 @@ func (pk *Passkeys) cmdRegister(baseURL string, args []string, w io.Writer, errW
 	fmt.Fprintln(w, "  ⏱  This link expires in 5 minutes.")
 	fmt.Fprintln(w)
 	return 0
+}
+
+// RegistrationLink starts a passkey registration for identity and returns the
+// link to open in a browser. It works once, for 5 minutes.
+func (pk *Passkeys) RegistrationLink(baseURL, identity, name string) (string, error) {
+	if pk.tokens != nil && !pk.tokens.IdentityExists(identity) {
+		return "", fmt.Errorf("unknown identity %q (not in auth config)", identity)
+	}
+	pr, err := pk.pending.Create(identity, name)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%s/passkey/r/%s", strings.TrimRight(baseURL, "/"), pr.Token), nil
 }
 
 func (pk *Passkeys) cmdList(w io.Writer) int {

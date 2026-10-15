@@ -1587,7 +1587,7 @@ func (s *Server) ListenAndServe() error {
 		}
 		frontend := assets.Dashboard()
 		s.warnIfDashboardMissing(frontend)
-		preparedRoutes = append(preparedRoutes, s.dashboardRoutes(frontend))
+		preparedRoutes = append(preparedRoutes, s.dashboardRoutes(frontend), s.harnessRoutes())
 	}
 	opts := []ssh.Option{
 		wish.WithAddress(fmt.Sprintf(":%d", s.config.Port)),

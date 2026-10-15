@@ -83,6 +83,15 @@ func (s *Server) passkeyRegistrationSteps() []string {
 	if origins == "" {
 		origins = s.config.HTTPBaseURL()
 	}
+	if s.config.Port == 0 {
+		// Agent Harness: with SSH off there's no shell to run `passkey register`
+		// from; an admin machine gets the link through the /harness API.
+		return append(steps,
+			"in Agent Harness on an admin machine, open Settings → Knowledge base and click Set up browser sign-in",
+			fmt.Sprintf("it opens a one-time link (it works for 5 minutes) in your browser; approve the passkey prompt there (the link must be opened at %s)", origins),
+			fmt.Sprintf("open %s and sign in with that passkey; the session lasts `passkeys.session_ttl`", s.config.HTTPBaseURL()+"/dashboard/"),
+		)
+	}
 	return append(steps,
 		fmt.Sprintf("from any SSH shell, run `ssh %s passkey register --identity %s` (any identity in lore.json, with or without an SSH key)", s.config.SSHTarget(), identity),
 		fmt.Sprintf("within 5 minutes, open the printed link in a browser on the device whose passkey you want to use; the link must be opened at an origin listed in `passkeys.rp_origins` (currently %s)", origins),

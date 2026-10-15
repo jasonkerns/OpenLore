@@ -4,7 +4,13 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="color-scheme" content="light dark" />
+    <link rel="icon" type="image/svg+xml" href="./src/logo.svg" />
     <title>OpenLore</title>
+    <style>
+      /* Until the stylesheet loads: the theme's page color, so the page never flashes white. */
+      html { background: #09090b; }
+      @media (prefers-color-scheme: light) { html { background: #f1f1f2; } }
+    </style>
   </head>
   <body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body>
 </html>

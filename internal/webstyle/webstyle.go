@@ -5,8 +5,8 @@ import _ "embed"
 //go:embed openlore.css
 var CSS []byte
 
-// Familjen is the sans-serif the dashboard uses; the shared stylesheet loads
-// it so server-rendered pages match.
+// Familjen was the dashboard's sans-serif; the pages now use the Agent Harness
+// font stack, and it stays served for pages cached before that change.
 //
 //go:embed familjen-grotesk.woff2
 var Familjen []byte

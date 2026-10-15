@@ -24,6 +24,7 @@ import {
   SearchIcon,
   SettingsIcon,
 } from "./icons";
+import logo from "./logo.svg";
 import { ThemeToggle } from "./ThemeToggle";
 import {
   defaults,
@@ -117,10 +118,8 @@ export function App() {
     return (
       <main className="startup">
         <div className="brand">
+          <img src={logo} alt="" width={28} height={28} />
           OpenLore
-          <span className="brand-slash" aria-hidden="true">
-            /
-          </span>
         </div>
         <h1>{canSignIn ? "Sign in to OpenLore" : "Dashboard not ready"}</h1>
         <p>{session.error.message}</p>
@@ -383,10 +382,8 @@ function Workspace({ session }: { session: Session }) {
           <MenuIcon />
         </button>
         <div className="brand">
+          <img src={logo} alt="" width={24} height={24} />
           <span>OpenLore</span>
-          <span className="brand-slash" aria-hidden="true">
-            /
-          </span>
         </div>
         <nav aria-label="Workspace views">
           <button

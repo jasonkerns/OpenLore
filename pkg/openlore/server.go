@@ -1859,7 +1859,7 @@ func (s *Server) ListenAndServe() error {
 					history := make([]passkeys.FileHistoryEntry, len(page.Records))
 					for i, entry := range page.Records {
 						history[i] = passkeys.FileHistoryEntry{
-							Time: entry.Time, Attribution: entry.Attribution.String(), Action: entry.Action, Hash: entry.ContentHash,
+							Time: entry.Time, Attribution: entry.Attribution.Label(), Action: entry.Action, Hash: entry.ContentHash,
 						}
 					}
 					return history, nil

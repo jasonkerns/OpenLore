@@ -5,36 +5,41 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"regexp"
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/aakarim/go-openlore/internal/config"
 )
 
-// The Agent Harness admin API. Each computer running Agent Harness is an
-// identity named machine-<name> that is a delegate of the owner, so its writes
-// are recorded as the owner acting through that machine. An admin machine (one
-// whose delegate entry does not deny lore:config:edit) manages the others from
-// the app: it adds machines (receiving their long-lived tokens), removes them
-// (which revokes those tokens), and gets passkey links for the owner's browser.
+// The Agent Harness admin API. Each person using Agent Harness is an identity
+// named by their email, accountable for everything done with their tokens:
+// their own edits and their agents' writes, which carry the agent as a label
+// (Attribution.Agent; see harnessAgentLabel). Admins (role owner, with
+// lore:config:edit) manage people from the app: add them (getting a code for
+// their computer), issue further codes (another computer, a reinstall), remove
+// them (which revokes every token they hold), and get passkey links for the
+// dashboard. Everyone can list their own agents' changes.
 //
 // Every route needs a bearer token; the management routes also need
 // lore:config:edit, the same capability that guards lore.json in the shell.
 
 const (
-	harnessMachinePrefix = "machine-"
-	harnessMachineTTL    = 365 * 24 * time.Hour
-	harnessConfigEdit    = "lore:config:edit"
+	harnessTokenTTL   = 365 * 24 * time.Hour
+	harnessConfigEdit = "lore:config:edit"
+	harnessAdminRole  = "owner"
+	harnessMemberRole = "member"
 )
 
-var harnessMachineName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,39}$`)
+// Deliberately loose: one "@", something on each side, no spaces or slashes.
+var harnessEmail = regexp.MustCompile(`^[^\s@/:]+@[^\s@/:]+\.[^\s@/:]+$`)
 
-type harnessMachine struct {
-	Name     string `json:"name"`
-	Identity string `json:"identity"`
-	Admin    bool   `json:"admin"`
+type harnessPerson struct {
+	Email string `json:"email"`
+	Admin bool   `json:"admin"`
 }
 
 func (s *Server) harnessRoutes() HTTPRouteRegistrar {
@@ -45,11 +50,36 @@ func (s *Server) harnessRoutes() HTTPRouteRegistrar {
 			_, _ = w.Write([]byte("ok\n"))
 		})
 		mux.Handle("GET /harness/me", s.harnessAuth(false, s.harnessMe))
-		mux.Handle("GET /harness/machines", s.harnessAuth(true, s.harnessListMachines))
-		mux.Handle("POST /harness/machines", s.harnessAuth(true, s.harnessAddMachine))
-		mux.Handle("DELETE /harness/machines/{name}", s.harnessAuth(true, s.harnessRemoveMachine))
+		mux.Handle("GET /harness/activity", s.harnessAuth(false, s.harnessActivity))
+		mux.Handle("GET /harness/people", s.harnessAuth(true, s.harnessListPeople))
+		mux.Handle("POST /harness/people", s.harnessAuth(true, s.harnessAddPerson))
+		mux.Handle("POST /harness/people/{email}/code", s.harnessAuth(true, s.harnessPersonCode))
+		mux.Handle("DELETE /harness/people/{email}", s.harnessAuth(true, s.harnessRemovePerson))
 		mux.Handle("POST /harness/passkey", s.harnessAuth(true, s.harnessPasskeyLink))
 	}
+}
+
+// harnessAgentLabel reads the agent an Agent Harness request is from. The
+// harness's relay sets the headers (percent-encoded, so any name survives); a
+// caller could claim any agent, but only within its own identity, which stays
+// the accountable party. Control characters are dropped and lengths capped.
+func harnessAgentLabel(r *http.Request) (name, id string) {
+	clean := func(raw string, max int) string {
+		if decoded, err := url.PathUnescape(raw); err == nil {
+			raw = decoded
+		}
+		raw = strings.Map(func(c rune) rune {
+			if unicode.IsControl(c) {
+				return -1
+			}
+			return c
+		}, strings.TrimSpace(raw))
+		if r := []rune(raw); len(r) > max {
+			raw = string(r[:max])
+		}
+		return raw
+	}
+	return clean(r.Header.Get("X-Harness-Agent"), 80), clean(r.Header.Get("X-Harness-Agent-Id"), 80)
 }
 
 // harnessAuth resolves the bearer token; with admin set it also requires
@@ -74,7 +104,7 @@ func (s *Server) harnessAuth(admin bool, next func(http.ResponseWriter, *http.Re
 			return
 		}
 		if admin && !s.harnessIsAdmin(id) {
-			harnessError(w, http.StatusForbidden, "this machine can't manage the knowledge base")
+			harnessError(w, http.StatusForbidden, "only an admin can manage the knowledge base")
 			return
 		}
 		next(w, r, id)
@@ -94,97 +124,119 @@ func (s *Server) harnessMe(w http.ResponseWriter, _ *http.Request, id Identity) 
 	})
 }
 
-func (s *Server) harnessListMachines(w http.ResponseWriter, _ *http.Request, id Identity) {
-	principal, ok := s.findAuthIdentity(id.Attribution.Principal)
-	if !ok {
-		harnessError(w, http.StatusForbidden, "unknown principal")
-		return
-	}
-	machines := []harnessMachine{}
-	for _, d := range principal.Delegates {
-		if name, ok := strings.CutPrefix(d.Identity, harnessMachinePrefix); ok {
-			machines = append(machines, harnessMachine{Name: name, Identity: d.Identity, Admin: !slices.Contains(d.DenyCapabilities, harnessConfigEdit)})
+func (s *Server) harnessListPeople(w http.ResponseWriter, _ *http.Request, _ Identity) {
+	people := []harnessPerson{}
+	for _, ident := range s.currentAuth().Identities {
+		if harnessEmail.MatchString(ident.Name) {
+			people = append(people, harnessPerson{Email: ident.Name, Admin: slices.Contains(ident.Roles, harnessAdminRole)})
 		}
 	}
-	harnessJSON(w, http.StatusOK, map[string]any{"machines": machines})
+	harnessJSON(w, http.StatusOK, map[string]any{"people": people})
 }
 
-func (s *Server) harnessAddMachine(w http.ResponseWriter, r *http.Request, id Identity) {
+func (s *Server) harnessAddPerson(w http.ResponseWriter, r *http.Request, id Identity) {
 	var body struct {
-		Name  string `json:"name"`
+		Email string `json:"email"`
 		Admin bool   `json:"admin"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body); err != nil {
-		harnessError(w, http.StatusBadRequest, "expected JSON {\"name\": ..., \"admin\": ...}")
+		harnessError(w, http.StatusBadRequest, "expected JSON {\"email\": ..., \"admin\": ...}")
 		return
 	}
-	if !harnessMachineName.MatchString(body.Name) {
-		harnessError(w, http.StatusBadRequest, "a machine name is 1-40 lowercase letters, digits and dashes")
+	email := strings.ToLower(strings.TrimSpace(body.Email))
+	if !harnessEmail.MatchString(email) || len(email) > 254 {
+		harnessError(w, http.StatusBadRequest, "that doesn't look like an email address")
 		return
 	}
-	principalName := id.Attribution.Principal
-	identity := harnessMachinePrefix + body.Name
+	role := harnessMemberRole
+	if body.Admin {
+		role = harnessAdminRole
+	}
 	errExists := errors.New("exists")
-	err := s.updateAuth(id.attribution(), "harness.machine.add", func(auth *config.AuthConfig) error {
+	err := s.updateAuth(id.attribution(), "harness.person.add", func(auth *config.AuthConfig) error {
 		for _, existing := range auth.Identities {
-			if existing.Name == identity {
+			if strings.EqualFold(existing.Name, email) {
 				return errExists
 			}
 		}
-		for i := range auth.Identities {
-			if auth.Identities[i].Name != principalName {
-				continue
-			}
-			entry := config.DelegateEntry{Identity: identity}
-			if !body.Admin {
-				entry.DenyCapabilities = []string{harnessConfigEdit}
-			}
-			auth.Identities[i].Delegates = append(auth.Identities[i].Delegates, entry)
-			auth.Identities = append(auth.Identities, config.AuthIdentity{Name: identity, Comment: "Agent Harness machine"})
-			return nil
+		if role == harnessMemberRole && !harnessHasMemberRole(auth) {
+			return errNoMemberRole
 		}
-		return fmt.Errorf("principal %q is not in lore.json", principalName)
+		auth.Identities = append(auth.Identities, config.AuthIdentity{Name: email, Comment: "Agent Harness person", Roles: []string{role}})
+		return nil
 	})
+	if errors.Is(err, errNoMemberRole) {
+		harnessError(w, http.StatusConflict, "lore.json has no member role with access to the documents (servers set up before people existed); add role \"member\" with the same docset grants as \"owner\" and restart the server")
+		return
+	}
 	if errors.Is(err, errExists) {
-		harnessError(w, http.StatusConflict, fmt.Sprintf("a machine named %q already exists; remove it first or pick another name", body.Name))
+		harnessError(w, http.StatusConflict, fmt.Sprintf("%s is already on this server; give them a new code instead", email))
 		return
 	}
 	if err != nil {
 		harnessError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	token, exp, err := s.issuer.Mint(Attribution{Principal: principalName, Actor: identity}, ScopeFull, harnessMachineTTL)
-	if err != nil {
-		harnessError(w, http.StatusInternalServerError, "minting the machine's token: "+err.Error())
+	s.harnessIssue(w, http.StatusCreated, harnessPerson{Email: email, Admin: body.Admin})
+}
+
+var errNoMemberRole = errors.New("no member role")
+
+// harnessHasMemberRole reports whether lore.json defines the member role with a
+// grant on some docset. `harness init` writes it; docset grants can't change
+// while the server runs, so it can't be added on the fly.
+func harnessHasMemberRole(auth *config.AuthConfig) bool {
+	if _, ok := auth.Roles[harnessMemberRole]; !ok {
+		return false
+	}
+	for _, docset := range auth.Docsets {
+		if docset.Access.Allow[harnessMemberRole] != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// harnessPersonCode issues another token for someone already on the server:
+// for another of their computers, or after reinstalling. Earlier tokens keep
+// working; removing the person revokes them all.
+func (s *Server) harnessPersonCode(w http.ResponseWriter, r *http.Request, _ Identity) {
+	email := strings.ToLower(r.PathValue("email"))
+	ident, ok := s.findAuthIdentity(email)
+	if !ok || !harnessEmail.MatchString(email) {
+		harnessError(w, http.StatusNotFound, "no such person")
 		return
 	}
-	harnessJSON(w, http.StatusCreated, map[string]any{
-		"machine":    harnessMachine{Name: body.Name, Identity: identity, Admin: body.Admin},
+	s.harnessIssue(w, http.StatusOK, harnessPerson{Email: email, Admin: slices.Contains(ident.Roles, harnessAdminRole)})
+}
+
+func (s *Server) harnessIssue(w http.ResponseWriter, status int, person harnessPerson) {
+	token, exp, err := s.issuer.Mint(Attribution{Principal: person.Email}, ScopeFull, harnessTokenTTL)
+	if err != nil {
+		harnessError(w, http.StatusInternalServerError, "minting the token: "+err.Error())
+		return
+	}
+	harnessJSON(w, status, map[string]any{
+		"person":     person,
 		"token":      token,
 		"expires_at": exp.UTC().Format(time.RFC3339),
 		"url":        s.config.HTTPBaseURL(),
 	})
 }
 
-func (s *Server) harnessRemoveMachine(w http.ResponseWriter, r *http.Request, id Identity) {
-	identity := harnessMachinePrefix + r.PathValue("name")
-	if identity == id.Attribution.Actor {
-		harnessError(w, http.StatusConflict, "a machine can't remove itself; remove it from another admin machine")
+func (s *Server) harnessRemovePerson(w http.ResponseWriter, r *http.Request, id Identity) {
+	email := strings.ToLower(r.PathValue("email"))
+	if strings.EqualFold(email, id.Attribution.Principal) {
+		harnessError(w, http.StatusConflict, "you can't remove yourself; another admin can")
 		return
 	}
-	principalName := id.Attribution.Principal
 	found := false
-	err := s.updateAuth(id.attribution(), "harness.machine.remove", func(auth *config.AuthConfig) error {
-		for i := range auth.Identities {
-			if auth.Identities[i].Name == principalName {
-				before := len(auth.Identities[i].Delegates)
-				auth.Identities[i].Delegates = slices.DeleteFunc(auth.Identities[i].Delegates, func(d config.DelegateEntry) bool { return d.Identity == identity })
-				found = found || len(auth.Identities[i].Delegates) != before
-			}
-		}
+	err := s.updateAuth(id.attribution(), "harness.person.remove", func(auth *config.AuthConfig) error {
 		before := len(auth.Identities)
-		auth.Identities = slices.DeleteFunc(auth.Identities, func(i config.AuthIdentity) bool { return i.Name == identity })
-		found = found || len(auth.Identities) != before
+		auth.Identities = slices.DeleteFunc(auth.Identities, func(i config.AuthIdentity) bool {
+			return strings.EqualFold(i.Name, email) && harnessEmail.MatchString(i.Name)
+		})
+		found = len(auth.Identities) != before
 		return nil
 	})
 	if err != nil {
@@ -192,14 +244,44 @@ func (s *Server) harnessRemoveMachine(w http.ResponseWriter, r *http.Request, id
 		return
 	}
 	if !found {
-		harnessError(w, http.StatusNotFound, "no such machine")
+		harnessError(w, http.StatusNotFound, "no such person")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// harnessPasskeyLink starts a passkey registration for the owner, so the owner
-// can sign in to the dashboard in a browser. The link works once, for 5 minutes.
+// harnessActivity lists the caller's own changes made by one of their agents
+// (agent_id), newest first: what that agent wrote, exactly, from the history.
+func (s *Server) harnessActivity(w http.ResponseWriter, r *http.Request, id Identity) {
+	agent := r.URL.Query().Get("agent_id")
+	if agent == "" {
+		harnessError(w, http.StatusBadRequest, "agent_id is required")
+		return
+	}
+	if s.history == nil {
+		harnessJSON(w, http.StatusOK, map[string]any{"available": false, "entries": []any{}})
+		return
+	}
+	page, err := s.history.Query(r.Context(), HistoryQuery{
+		Roots:     historyRoots(s.sessionDocsets(id)),
+		Principal: id.Attribution.Principal,
+		AgentID:   agent,
+		Limit:     100,
+		Cursor:    r.URL.Query().Get("cursor"),
+	})
+	if err != nil {
+		harnessError(w, http.StatusServiceUnavailable, "history unavailable")
+		return
+	}
+	entries := make([]map[string]any, 0, len(page.Records))
+	for _, record := range page.Records {
+		entries = append(entries, map[string]any{"time": record.Time, "path": record.FileKey, "action": record.Action, "agent": record.Attribution.Agent, "hash": record.ContentHash})
+	}
+	harnessJSON(w, http.StatusOK, map[string]any{"available": true, "entries": entries, "next_cursor": page.NextCursor})
+}
+
+// harnessPasskeyLink starts a passkey registration for the caller, so they can
+// sign in to the dashboard in a browser. The link works once, for 5 minutes.
 func (s *Server) harnessPasskeyLink(w http.ResponseWriter, r *http.Request, id Identity) {
 	if s.passkeys == nil {
 		harnessError(w, http.StatusConflict, "passkeys are turned off on this server")

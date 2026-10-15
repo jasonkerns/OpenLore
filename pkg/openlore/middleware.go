@@ -14,7 +14,12 @@ type Attribution struct {
 	Actor      string            `json:"actor,omitempty"`
 	ActorKind  string            `json:"actor_kind,omitempty"`
 	ClientAuth ClientAuthLevel   `json:"client_auth,omitempty"`
-	Extra      map[string]string `json:"-"`
+	// Agent and AgentID name the Agent Harness agent that made the request
+	// (the X-Harness-Agent headers): a label recorded with writes, never a
+	// source of authority. The identity above is who is accountable.
+	Agent   string            `json:"agent,omitempty"`
+	AgentID string            `json:"agent_id,omitempty"`
+	Extra   map[string]string `json:"-"`
 	// internal is an unforgeable package capability. Public callers can set ID
 	// for attribution, but only OpenLore's own submission path can set this bit.
 	internal bool
@@ -25,6 +30,16 @@ func (a Attribution) String() string {
 		return a.Principal
 	}
 	return a.Principal + "/" + a.Actor
+}
+
+// Label is how history shows who made a change: String, then the agent when
+// there is one ("jk@test.com:Rick"). String stays free of the agent because
+// folder rules and session binding match on it.
+func (a Attribution) Label() string {
+	if a.Agent == "" {
+		return a.String()
+	}
+	return a.String() + ":" + a.Agent
 }
 
 // ── Admission (pre-commit write) chain ──────────────────────────────────────

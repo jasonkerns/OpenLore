@@ -1604,7 +1604,10 @@ func ValidateAuthConfig(auth *AuthConfig) error {
 		if ident.Name == "" || strings.TrimSpace(ident.Name) != ident.Name {
 			return fmt.Errorf("invalid identity name %q", ident.Name)
 		}
-		if strings.Contains(ident.Name, "/") || (strings.Contains(ident.Name, "@") && ident.CreatedBy != "oauth") {
+		// Agent Harness: "@" is allowed so people can be named by their email.
+		// Upstream reserves it for OAuth-created names; that sign-in isn't used
+		// here, and an OAuth name that clashed would be refused as existing.
+		if strings.Contains(ident.Name, "/") {
 			return fmt.Errorf("identity name %q uses a reserved character", ident.Name)
 		}
 		if ident.CreatedBy != "" && ident.CreatedBy != "oauth" {

@@ -115,8 +115,11 @@ func TestDelegateEntryRoundTripPreservesExplicitEmptyRoles(t *testing.T) {
 }
 
 func TestLoadAuthConfigRejectsReservedIdentityNamesAndUnknownDelegates(t *testing.T) {
+	// Agent Harness allows "@" so people can be named by email; "/" stays reserved.
+	if _, err := LoadAuthConfig(writeAuth(t, `{"identities":[{"name":"jk@test.com"}]}`)); err != nil {
+		t.Fatalf("rejected an email identity: %v", err)
+	}
 	for _, body := range []string{
-		`{"identities":[{"name":"hand@written"}]}`,
 		`{"identities":[{"name":"has/slash"}]}`,
 		`{"identities":[{"name":"adil","delegates":[{"identity":"missing"}]}]}`,
 	} {

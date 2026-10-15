@@ -637,7 +637,7 @@ func (s *Server) dashboardHistory(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for _, record := range page.Records {
-			entries = append(entries, passkeys.FileHistoryEntry{Time: record.Time, Attribution: record.Attribution.String(), Action: record.Action, Hash: record.ContentHash})
+			entries = append(entries, passkeys.FileHistoryEntry{Time: record.Time, Attribution: record.Attribution.Label(), Action: record.Action, Hash: record.ContentHash})
 		}
 		result["entries"], result["next_cursor"] = entries, page.NextCursor
 	}

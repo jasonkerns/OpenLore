@@ -43,7 +43,9 @@ type HistoryQuery struct {
 	Roots     []string
 	Principal string
 	Actor     string
-	Limit     int
+	// AgentID keeps only changes made by that Agent Harness agent.
+	AgentID string
+	Limit   int
 	Cursor    string
 }
 
@@ -318,7 +320,7 @@ func (s *JSONLHistoryStore) Query(_ context.Context, query HistoryQuery) (Histor
 		if query.FileKey != "" && record.FileKey != vfs.CleanPath(query.FileKey) {
 			continue
 		}
-		if !historyReadable(query.Roots, record.FileKey) || query.Principal != "" && record.Attribution.Principal != query.Principal || query.Actor != "" && record.Attribution.Actor != query.Actor {
+		if !historyReadable(query.Roots, record.FileKey) || query.Principal != "" && record.Attribution.Principal != query.Principal || query.Actor != "" && record.Attribution.Actor != query.Actor || query.AgentID != "" && record.Attribution.AgentID != query.AgentID {
 			continue
 		}
 		matches = append(matches, record)
@@ -450,7 +452,7 @@ func (h scopedHistory) Query(principal, actor string) ([]byte, error) {
 				Target      string `json:"target"`
 				Action      string `json:"action"`
 				Hash        string `json:"hash,omitempty"`
-			}{record.CommitID, record.Time.Format(time.RFC3339), record.Attribution.String(), record.FileKey, record.Action, record.ContentHash})
+			}{record.CommitID, record.Time.Format(time.RFC3339), record.Attribution.Label(), record.FileKey, record.Action, record.ContentHash})
 			out = append(out, line...)
 			out = append(out, '\n')
 		}

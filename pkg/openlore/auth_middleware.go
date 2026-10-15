@@ -66,6 +66,7 @@ func (s *Server) authMiddleware(next http.Handler, required bool) http.Handler {
 			return
 		}
 
+		id.Attribution.Agent, id.Attribution.AgentID = harnessAgentLabel(r)
 		next.ServeHTTP(w, r.WithContext(contextWithIdentity(r.Context(), id)))
 	})
 }

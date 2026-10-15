@@ -17,7 +17,9 @@ identity.
 | `port: 0` turns SSH off; the server then runs HTTP(S) only | `internal/config/config.go`, `pkg/openlore/server.go`, `internal/httpserver` |
 | `lore.json` is re-read when it changes on disk (every 2 s), so adding or removing an identity or delegate takes effect without a restart | `pkg/openlore/auth_watch.go` |
 | `openlore harness init` / `setup-code`: first-run setup and setup codes (below) | `cmd/openlore/harness_cmd.go` |
-| The `/harness` API: machines, passkey links, health check (below) | `pkg/openlore/harness_admin.go` |
+| The `/harness` API: people, agent activity, passkey links, health check (below) | `pkg/openlore/harness_admin.go` |
+| Identity names may contain `@` (people are named by email); `/` stays reserved | `internal/config/config.go` |
+| `X-Harness-Agent` / `X-Harness-Agent-Id` on a request are recorded as `Attribution.Agent`/`AgentID`: a label, never authority, shown in history as `email:agent` (`Attribution.Label`); `String` is unchanged because folder rules and session binding match on it | `pkg/openlore/middleware.go`, `auth_middleware.go`, `history.go` |
 | `openlore token mint --actor <identity>` mints a delegated token (the actor must be one of the principal's `delegates`) | `cmd/openlore/main.go` |
 | `openlore tls cert --cert … --key … --hosts …` writes a self-signed certificate and prints its SHA-256 fingerprint, for HTTPS on a private network where clients pin the certificate | `cmd/openlore/tls_cmd.go` |
 
@@ -26,20 +28,23 @@ the `openlore` binary is where the rules are enforced.
 
 ## How Agent Harness uses it
 
-- **Identities.** The owner is the one identity with the `owner` role (`lore:config:edit`, `lore:access:view`, read/write
-  on all docs). Each computer running Agent Harness is an identity `machine-<name>` that is a delegate of the owner,
-  so its writes are recorded as the owner acting through that machine. Ordinary machines have `lore:config:edit`
-  denied; admin machines don't.
+- **Identities.** Each person is an identity named by their email, accountable for everything done with their
+  tokens: their own edits and their agents' writes. Admins have the `owner` role (`lore:config:edit`,
+  `lore:access:view`, read/write on all docs); everyone else the `member` role (read/write docs). `harness init`
+  also creates a bootstrap identity (`--owner`, default `owner`) used only by setup codes. Agents aren't identities:
+  the app's relay labels each request with the agent's name and id (`X-Harness-Agent*`), recorded with each change.
 - **First start.** `openlore harness init --dir <dir> --url https://<public address> [--owner <name>]` writes
   `openlore.yml` (SSH off, plain HTTP on 8080, tokens and passkeys for the public address) and `lore.json`, and makes an
   empty `docs` folder. Existing files are kept, so it's safe on every start (`deploy/aws/start.sh` runs it). The first
   time, it prints a **setup code** (`olsetup1.` + the address and a one-hour owner token).
-- **Joining.** Pasting the setup code into the app's Settings → Knowledge base makes that computer an admin machine:
-  the app calls `POST /harness/machines` with the owner token and keeps only the machine's own one-year token. An
-  admin machine adds others (each gets a **connection code**, `olpair1.` + address, token and machine name) and
-  removes them, which deletes the identity and revokes its token at once. For a fresh setup code later:
+- **Joining.** Pasting the setup code into the app's Settings → Knowledge base, with your email, makes you an admin:
+  the app calls `POST /harness/people` with the bootstrap token (or `…/code` if you're already there) and keeps only
+  your own one-year token. Admins add people (each gets a **connection code**, `olpair1.` + address, token and
+  email), give someone another code (another computer; their other codes keep working), and remove people, which
+  deletes the identity and revokes all their tokens at once. For a fresh setup code later:
   `openlore harness setup-code --config <dir>/openlore.yml`.
-- **Agents** reach `/mcp` through a relay in the app that adds the machine's token; they never see it.
+- **Agents** reach `/mcp` through a relay in the app, each at its own address, that adds the person's token and the
+  agent label; they never see the token.
 
 ### The `/harness` API
 
@@ -49,10 +54,12 @@ Bearer tokens only (no cookies, so no CSRF). "Admin" means the caller has `lore:
 |---|---|---|
 | `GET /harness/health` | anyone | `ok`, for load balancer health checks |
 | `GET /harness/me` | any identity | `{principal, actor, admin, passkeys}` |
-| `GET /harness/machines` | admin | the owner's `machine-*` delegates |
-| `POST /harness/machines` `{name, admin}` | admin | adds `machine-<name>`; returns its token (409 if it exists) |
-| `DELETE /harness/machines/{name}` | admin | removes it (409 for the caller's own machine) |
-| `POST /harness/passkey?device=…` | admin | a one-time, 5-minute link that registers a passkey for the owner, for the dashboard |
+| `GET /harness/activity?agent_id=…&cursor=` | any identity | the caller's own changes made by that agent, newest first |
+| `GET /harness/people` | admin | identities named by email, with whether each is an admin |
+| `POST /harness/people` `{email, admin}` | admin | adds the person (`owner` or `member` role); returns their token (409 if they exist; needs the `member` role in lore.json, which `harness init` writes) |
+| `POST /harness/people/{email}/code` | admin | another token for an existing person |
+| `DELETE /harness/people/{email}` | admin | removes them, revoking every token (409 for yourself) |
+| `POST /harness/passkey?device=…` | admin | a one-time, 5-minute link that registers a passkey for the caller, for the dashboard |
 
 ## Development
 

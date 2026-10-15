@@ -56,6 +56,7 @@ func (s *Server) harnessRoutes() HTTPRouteRegistrar {
 		mux.Handle("POST /harness/people/{email}/code", s.harnessAuth(true, s.harnessPersonCode))
 		mux.Handle("DELETE /harness/people/{email}", s.harnessAuth(true, s.harnessRemovePerson))
 		mux.Handle("POST /harness/passkey", s.harnessAuth(true, s.harnessPasskeyLink))
+		s.harnessChangeRoutes(mux)
 	}
 }
 

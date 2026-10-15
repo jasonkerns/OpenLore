@@ -127,8 +127,8 @@ func harnessInit(args []string, stdout, stderr io.Writer) int {
 			"owner":  map[string]any{"allow": map[string]any{"capabilities": []string{"lore:config:edit", "lore:access:view"}}},
 			"member": map[string]any{"comment": "Agent Harness person: reads and writes documents"},
 		},
-		"docsets": map[string]any{"docs": map[string]any{"paths": []string{"/"}, "access": map[string]any{"allow": map[string]string{"owner": "rw", "member": "rw"}}}},
-		"identities":       []any{map[string]any{"name": *owner, "roles": []string{"owner"}}},
+		"docsets":    map[string]any{"docs": map[string]any{"paths": []string{"/"}, "access": map[string]any{"allow": map[string]string{"owner": "rw", "member": "rw"}}}},
+		"identities": []any{map[string]any{"name": *owner, "roles": []string{"owner"}}},
 	}
 	b, _ := json.MarshalIndent(auth, "", "  ")
 	wroteAuth, err := writeIfMissing(authPath, append(b, '\n'))

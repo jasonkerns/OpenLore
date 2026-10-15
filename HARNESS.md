@@ -17,7 +17,7 @@ identity.
 | `port: 0` turns SSH off; the server then runs HTTP(S) only | `internal/config/config.go`, `pkg/openlore/server.go`, `internal/httpserver` |
 | `lore.json` is re-read when it changes on disk (every 2 s), so adding or removing an identity or delegate takes effect without a restart | `pkg/openlore/auth_watch.go` |
 | `openlore harness init` / `setup-code`: first-run setup and setup codes (below) | `cmd/openlore/harness_cmd.go` |
-| The `/harness` API: people, agent activity, passkey links, health check (below) | `pkg/openlore/harness_admin.go` |
+| The `/harness` API: people, agent activity, passkey links, health check, the change feed, file versions and compare-and-swap editing (below) | `pkg/openlore/harness_admin.go`, `harness_changes.go` |
 | Identity names may contain `@` (people are named by email); `/` stays reserved | `internal/config/config.go` |
 | `X-Harness-Agent` / `X-Harness-Agent-Id` on a request are recorded as `Attribution.Agent`/`AgentID`: a label, never authority, shown in history as `email:agent` (`Attribution.Label`); `String` is unchanged because folder rules and session binding match on it | `pkg/openlore/middleware.go`, `auth_middleware.go`, `history.go` |
 | `openlore token mint --actor <identity>` mints a delegated token (the actor must be one of the principal's `delegates`) | `cmd/openlore/main.go` |
@@ -60,6 +60,11 @@ Bearer tokens only (no cookies, so no CSRF). "Admin" means the caller has `lore:
 | `POST /harness/people/{email}/code` | admin | another token for an existing person |
 | `DELETE /harness/people/{email}` | admin | removes them, revoking every token (409 for yourself) |
 | `POST /harness/passkey?device=…` | admin | a one-time, 5-minute link that registers a passkey for the caller, for the dashboard |
+| `GET /harness/changes?cursor=&limit=` | any identity | every file change the caller can read, newest first (from the commit journal): who (`by` = `email:agent`), when, and per file the action and before/after hashes |
+| `GET /harness/blob?path=&hash=` | any identity | one version of a file, only if its history shows that hash for that path (new bytes from the change itself, earlier ones from the pre-image store, else the current file) |
+| `GET /harness/file?path=` | any identity | a document's text and hash, the base for an edit |
+| `PUT /harness/file?path=` | anyone who may write there | saves the body; needs `If-Match: <hash>` (replace that version) or `If-None-Match: *` (create; parent folders are made); 412 with the current hash if it changed; goes through the write log, so history, rules and attribution apply |
+| `DELETE /harness/file?path=` | anyone who may write there | removes the document if it's still `If-Match` |
 
 ## Development
 

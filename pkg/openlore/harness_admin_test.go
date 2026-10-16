@@ -218,6 +218,21 @@ func TestHarnessActivityNeedsAnAgent(t *testing.T) {
 	}
 }
 
+func TestHarnessAuthCarriesTheAgentLabel(t *testing.T) {
+	s, _ := newHarnessTestServer(t)
+	owner, _, _ := s.issuer.Mint(Attribution{Principal: "jason"}, ScopeFull, time.Hour)
+	var got Attribution
+	h := s.harnessAuth(false, func(w http.ResponseWriter, _ *http.Request, id Identity) { got = id.Attribution })
+	req := httptest.NewRequest("PUT", "/harness/file?path=/docs/a.md", nil)
+	req.Header.Set("Authorization", "Bearer "+owner)
+	req.Header.Set("X-Harness-Agent", "Rick")
+	req.Header.Set("X-Harness-Agent-Id", "a1")
+	h.ServeHTTP(httptest.NewRecorder(), req)
+	if got.Label() != "jason:Rick" || got.AgentID != "a1" || got.String() != "jason" {
+		t.Fatalf("attribution = %+v (label %q)", got, got.Label())
+	}
+}
+
 func TestHarnessAdmin_PasskeysOff(t *testing.T) {
 	s, h := newHarnessTestServer(t)
 	owner, _, _ := s.issuer.Mint(Attribution{Principal: "jason"}, ScopeFull, time.Hour)

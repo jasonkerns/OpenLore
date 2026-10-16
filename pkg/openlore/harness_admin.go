@@ -108,6 +108,8 @@ func (s *Server) harnessAuth(admin bool, next func(http.ResponseWriter, *http.Re
 			harnessError(w, http.StatusForbidden, "only an admin can manage the knowledge base")
 			return
 		}
+		// Writes the app makes for an agent (publishing its specs) carry its label, as over MCP.
+		id.Attribution.Agent, id.Attribution.AgentID = harnessAgentLabel(r)
 		next(w, r, id)
 	})
 }

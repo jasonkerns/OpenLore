@@ -19,7 +19,7 @@ identity.
 | `openlore harness init` / `setup-code`: first-run setup, the starter folder layout and setup codes (below) | `cmd/openlore/harness_cmd.go`, `harness_layout.go` |
 | The `/harness` API: people, agent activity, passkey links, health check, the change feed, file versions and compare-and-swap editing (below) | `pkg/openlore/harness_admin.go`, `harness_changes.go` |
 | Identity names may contain `@` (people are named by email); `/` stays reserved | `internal/config/config.go` |
-| `X-Harness-Agent` / `X-Harness-Agent-Id` on a request are recorded as `Attribution.Agent`/`AgentID`: a label, never authority, shown in history as `email:agent` (`Attribution.Label`); `String` is unchanged because folder rules and session binding match on it | `pkg/openlore/middleware.go`, `auth_middleware.go`, `history.go` |
+| `X-Harness-Agent` / `X-Harness-Agent-Id` on a request are recorded as `Attribution.Agent`/`AgentID`: a label, never authority, shown in history as `email:agent` (`Attribution.Label`), over MCP, `/api` and `/harness` (the app labels its own writes for an agent, such as copied OpenSpec documents); `String` is unchanged because folder rules and session binding match on it | `pkg/openlore/middleware.go`, `auth_middleware.go`, `harness_admin.go`, `history.go` |
 | `openlore token mint --actor <identity>` mints a delegated token (the actor must be one of the principal's `delegates`) | `cmd/openlore/main.go` |
 | `openlore tls cert --cert … --key … --hosts …` writes a self-signed certificate and prints its SHA-256 fingerprint, for HTTPS on a private network where clients pin the certificate | `cmd/openlore/tls_cmd.go` |
 

@@ -104,12 +104,13 @@ func (s *Server) harnessAuth(admin bool, next func(http.ResponseWriter, *http.Re
 			harnessError(w, http.StatusForbidden, "the token names no identity on this server")
 			return
 		}
+		// Writes the app makes for an agent (publishing its specs) carry its label, as over MCP. Set before the admin
+		// check: a request labelled as an agent's is never an admin's (see agentDeniedCapabilities).
+		id.Attribution.Agent, id.Attribution.AgentID = harnessAgentLabel(r)
 		if admin && !s.harnessIsAdmin(id) {
 			harnessError(w, http.StatusForbidden, "only an admin can manage the knowledge base")
 			return
 		}
-		// Writes the app makes for an agent (publishing its specs) carry its label, as over MCP.
-		id.Attribution.Agent, id.Attribution.AgentID = harnessAgentLabel(r)
 		next(w, r, id)
 	})
 }

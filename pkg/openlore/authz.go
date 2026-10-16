@@ -176,8 +176,17 @@ func (s *Server) currentPolicy(id Identity) (AuthorizationPolicy, error) {
 			}
 		}
 	}
+	if id.Attribution.Agent != "" || id.Attribution.AgentID != "" {
+		// An Agent Harness agent works with its person's token, through the app's relay, which always labels it.
+		// Agents never see the token, so they can't drop the label: whatever their person may do, they can't
+		// change who has access (/opt/openlore/lore.json, passkeys, people, reloads).
+		policy.DenyCapabilities = append(slices.Clone(policy.DenyCapabilities), agentDeniedCapabilities...)
+	}
 	return policy, nil
 }
+
+// agentDeniedCapabilities are withheld from requests labelled as an agent's.
+var agentDeniedCapabilities = []string{"lore:config:edit"}
 
 func (s *Server) effectiveGrantNames(id Identity, name string) ([]string, bool) {
 	if !s.authEnforced {

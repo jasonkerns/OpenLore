@@ -233,6 +233,46 @@ func TestHarnessAuthCarriesTheAgentLabel(t *testing.T) {
 	}
 }
 
+func TestHarnessAgentsAreNeverAdmins(t *testing.T) {
+	s, h := newHarnessTestServer(t)
+	owner, _, _ := s.issuer.Mint(Attribution{Principal: "jason"}, ScopeFull, time.Hour)
+	do := func(method, path, agent string) (int, map[string]any) {
+		req := httptest.NewRequest(method, path, strings.NewReader(`{"email":"x@test.com","admin":false}`))
+		req.Header.Set("Authorization", "Bearer "+owner)
+		if agent != "" {
+			req.Header.Set("X-Harness-Agent", agent)
+			req.Header.Set("X-Harness-Agent-Id", "a1")
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		out := map[string]any{}
+		_ = json.Unmarshal(rec.Body.Bytes(), &out)
+		return rec.Code, out
+	}
+	if code, me := do("GET", "/harness/me", ""); code != http.StatusOK || me["admin"] != true {
+		t.Fatalf("the owner: %d %v", code, me)
+	}
+	if code, me := do("GET", "/harness/me", "Rick"); code != http.StatusOK || me["admin"] != false {
+		t.Fatalf("the owner's agent: %d %v, want admin false", code, me)
+	}
+	if code, _ := do("GET", "/harness/people", "Rick"); code != http.StatusForbidden {
+		t.Fatalf("an agent listed people: %d", code)
+	}
+	if code, _ := do("POST", "/harness/people", "Rick"); code != http.StatusForbidden {
+		t.Fatalf("an agent added a person: %d", code)
+	}
+
+	// The config file in the shell's view (/opt/openlore/lore.json) is there for the owner and not for their agents.
+	id := Identity{IdentityName: "jason", Principal: AuthenticatedPrincipal{IdentityName: "jason"}, Scopes: []string{ScopeFull}}
+	if !s.hasCurrentCapability(id, "lore:config:edit") {
+		t.Fatal("the owner lost lore:config:edit")
+	}
+	id.Attribution = Attribution{Principal: "jason", Agent: "Rick", AgentID: "a1"}
+	if s.hasCurrentCapability(id, "lore:config:edit") {
+		t.Fatal("an agent has lore:config:edit")
+	}
+}
+
 func TestHarnessAdmin_PasskeysOff(t *testing.T) {
 	s, h := newHarnessTestServer(t)
 	owner, _, _ := s.issuer.Mint(Attribution{Principal: "jason"}, ScopeFull, time.Hour)

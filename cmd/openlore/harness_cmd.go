@@ -84,6 +84,12 @@ func harnessInit(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 	}
+	if seeded, err := seedHarnessLayout(filepath.Join(root, "docs")); err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return 1
+	} else if seeded {
+		fmt.Fprintf(stdout, "Wrote the starter folders in %s\n", filepath.Join(root, "docs"))
+	}
 	ymlPath := filepath.Join(root, "openlore.yml")
 	authPath := filepath.Join(root, "config", "lore.json")
 	slash := filepath.ToSlash
@@ -110,6 +116,9 @@ func harnessInit(args []string, stdout, stderr io.Writer) int {
 		"  audience: " + url,
 		"  access_ttl: 1h",
 		"  refresh_ttl: 720h",
+		"plugins:",
+		"  skills:",
+		"    enabled: true # Agent Skills collections, e.g. /skills",
 		"",
 	}, "\n")
 	if wrote, err := writeIfMissing(ymlPath, []byte(yml)); err != nil {

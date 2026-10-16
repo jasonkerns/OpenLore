@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -56,13 +57,35 @@ func TestHarnessInit(t *testing.T) {
 		t.Fatalf("setup token: claims=%+v err=%v", claims, err)
 	}
 
-	// A second run keeps everything and prints no new code.
+	if !cfg.Plugins.Skills.Enabled {
+		t.Fatal("init config doesn't turn on Agent Skills")
+	}
+
+	// The empty docs folder gets the starter layout; skills/ stays empty, since
+	// each child of a skills collection must be a skill.
+	for rel := range harnessLayout {
+		if _, err := os.Stat(filepath.Join(dir, "docs", filepath.FromSlash(rel))); err != nil {
+			t.Fatalf("starter layout: %v", err)
+		}
+	}
+	if entries, _ := os.ReadDir(filepath.Join(dir, "docs", "skills")); len(entries) != 0 {
+		t.Fatalf("skills/ has %d entries, want none", len(entries))
+	}
+
+	// A second run keeps everything and prints no new code, and doesn't seed a
+	// docs folder that has something in it.
+	if err := os.Remove(filepath.Join(dir, "docs", "ideas", "README.md")); err != nil {
+		t.Fatal(err)
+	}
 	out.Reset()
 	if code := runHarness([]string{"init", "--dir", dir, "--url", "https://other.test"}, &out, &errOut); code != 0 {
 		t.Fatalf("second init exit %d", code)
 	}
 	if strings.Contains(out.String(), "olsetup1.") || !strings.Contains(out.String(), "Already set up") {
 		t.Fatalf("second init output:\n%s", out.String())
+	}
+	if _, err := os.Stat(filepath.Join(dir, "docs", "ideas", "README.md")); err == nil {
+		t.Fatal("second init seeded a docs folder that wasn't empty")
 	}
 
 	if code := runHarness([]string{"init", "--dir", t.TempDir(), "--url", "http://lore.test"}, &out, &errOut); code == 0 {

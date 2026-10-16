@@ -16,7 +16,7 @@ identity.
 | The shell's `passkey` command is an admin action (needs `lore:config:edit`). Upstream treats it as a read, so any signed-in caller could register a passkey for any identity, including the owner | `internal/passkeys/command.go` |
 | `port: 0` turns SSH off; the server then runs HTTP(S) only | `internal/config/config.go`, `pkg/openlore/server.go`, `internal/httpserver` |
 | `lore.json` is re-read when it changes on disk (every 2 s), so adding or removing an identity or delegate takes effect without a restart | `pkg/openlore/auth_watch.go` |
-| `openlore harness init` / `setup-code`: first-run setup and setup codes (below) | `cmd/openlore/harness_cmd.go` |
+| `openlore harness init` / `setup-code`: first-run setup, the starter folder layout and setup codes (below) | `cmd/openlore/harness_cmd.go`, `harness_layout.go` |
 | The `/harness` API: people, agent activity, passkey links, health check, the change feed, file versions and compare-and-swap editing (below) | `pkg/openlore/harness_admin.go`, `harness_changes.go` |
 | Identity names may contain `@` (people are named by email); `/` stays reserved | `internal/config/config.go` |
 | `X-Harness-Agent` / `X-Harness-Agent-Id` on a request are recorded as `Attribution.Agent`/`AgentID`: a label, never authority, shown in history as `email:agent` (`Attribution.Label`); `String` is unchanged because folder rules and session binding match on it | `pkg/openlore/middleware.go`, `auth_middleware.go`, `history.go` |
@@ -34,9 +34,15 @@ the `openlore` binary is where the rules are enforced.
   also creates a bootstrap identity (`--owner`, default `owner`) used only by setup codes. Agents aren't identities:
   the app's relay labels each request with the agent's name and id (`X-Harness-Agent*`), recorded with each change.
 - **First start.** `openlore harness init --dir <dir> --url https://<public address> [--owner <name>]` writes
-  `openlore.yml` (SSH off, plain HTTP on 8080, tokens and passkeys for the public address) and `lore.json`, and makes an
-  empty `docs` folder. Existing files are kept, so it's safe on every start (`deploy/aws/start.sh` runs it). The first
-  time, it prints a **setup code** (`olsetup1.` + the address and a one-hour owner token).
+  `openlore.yml` (SSH off, plain HTTP on 8080, tokens and passkeys for the public address, Agent Skills on) and
+  `lore.json`, and makes the `docs` folder. Existing files are kept, so it's safe on every start (`deploy/aws/start.sh`
+  runs it). The first time, it prints a **setup code** (`olsetup1.` + the address and a one-hour owner token).
+- **Starter layout.** An empty `docs` folder gets one server's worth of folders for all projects, organised around
+  OpenSpec (`cmd/openlore/harness_layout.go`): `projects/<project>/` (`project.md`, and `specs/`, `changes/`,
+  `archive/` copied from the repo's `openspec/`), `standards/`, `ideas/`, `explorations/`, `decisions/`, `runbooks/`
+  and `skills/`, each with a short `README.md` saying what goes there (except `skills/`, where every child must be a
+  skill; it becomes a collection with `skills enable /skills`, which the app will run). Agent Harness will give each kind of folder its own menu, by path. Plan:
+  `docs/openspec-lore-plan.md` in the harness.
 - **Joining.** Pasting the setup code into the app's Settings → Knowledge base, with your email, makes you an admin:
   the app calls `POST /harness/people` with the bootstrap token (or `…/code` if you're already there) and keeps only
   your own one-year token. Admins add people (each gets a **connection code**, `olpair1.` + address, token and

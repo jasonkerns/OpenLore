@@ -119,6 +119,10 @@ func harnessInit(args []string, stdout, stderr io.Writer) int {
 		"plugins:",
 		"  skills:",
 		"    enabled: true # Agent Skills collections, e.g. /skills",
+		"files:",
+		"  # The default file types plus scripts, so team skills in /skills can carry theirs. Agents may run them on",
+		"  # their own computers: anyone who can write here can hand them a script.",
+		"  allowed: [" + strings.Join(harnessAllowedFiles, ", ") + "]",
 		"",
 	}, "\n")
 	if wrote, err := writeIfMissing(ymlPath, []byte(yml)); err != nil {

@@ -41,7 +41,9 @@ the `openlore` binary is where the rules are enforced.
   OpenSpec (`cmd/openlore/harness_layout.go`): `projects/<project>/` (`project.md`, and `specs/`, `changes/`,
   `archive/` copied from the repo's `openspec/`), `standards/`, `ideas/`, `explorations/`, `decisions/`, `runbooks/`
   and `skills/`, each with a short `README.md` saying what goes there (except `skills/`, where every child must be a
-  skill; it becomes a collection with `skills enable /skills`, which the app will run). Agent Harness will give each kind of folder its own menu, by path. Plan:
+  skill; it becomes a collection with `skills enable /skills`, which the app runs; that marker is an extended attribute,
+  so on storage without them (Windows, probably EFS) it answers `unsupported` and the app copies the skills without it).
+  The config allows scripts (`.sh`, `.ps1`, `.py`, …) besides upstream's default file types, since skills carry them. Agent Harness will give each kind of folder its own menu, by path. Plan:
   `docs/openspec-lore-plan.md` in the harness.
 - **Joining.** Pasting the setup code into the app's Settings → Knowledge base, with your email, makes you an admin:
   the app calls `POST /harness/people` with the bootstrap token (or `…/code` if you're already there) and keeps only

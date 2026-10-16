@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -57,6 +58,9 @@ func TestHarnessInit(t *testing.T) {
 		t.Fatalf("setup token: claims=%+v err=%v", claims, err)
 	}
 
+	if !slices.Contains(cfg.Files.Allowed, "*.sh") || !slices.Contains(cfg.Files.Allowed, "*.md") || !slices.Contains(cfg.Files.Allowed, "*.png") {
+		t.Fatalf("allowed files = %v, want the defaults plus scripts", cfg.Files.Allowed)
+	}
 	if !cfg.Plugins.Skills.Enabled {
 		t.Fatal("init config doesn't turn on Agent Skills")
 	}

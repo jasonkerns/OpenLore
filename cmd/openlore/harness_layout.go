@@ -70,6 +70,15 @@ how to undo it.
 	"skills/": "",
 }
 
+// harnessAllowedFiles is the file types the server takes: upstream's defaults
+// (documents, data, images) plus scripts, which Agent Skills often include.
+var harnessAllowedFiles = []string{
+	`"*.md"`, `"*.markdown"`, `"*.txt"`, `"*.html"`, `"*.htm"`, `"*.css"`, `"*.js"`,
+	`"*.json"`, `"*.jsonl"`, `"*.yaml"`, `"*.yml"`, `"*.csv"`, `"*.tsv"`, `"*.xml"`, `"*.toml"`,
+	`"*.png"`, `"*.jpg"`, `"*.jpeg"`, `"*.gif"`, `"*.svg"`, `"*.webp"`,
+	`"*.sh"`, `"*.bash"`, `"*.ps1"`, `"*.py"`, `"*.mjs"`, `"*.cjs"`, `"*.ts"`, `"*.rb"`,
+}
+
 // seedHarnessLayout writes harnessLayout into docs when docs is empty, and
 // reports whether it did. A docs folder with anything in it is left alone.
 func seedHarnessLayout(docs string) (bool, error) {

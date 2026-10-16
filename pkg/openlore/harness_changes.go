@@ -55,7 +55,7 @@ func (s *Server) harnessChangeRoutes(mux *http.ServeMux) {
 
 // harnessCommits reads the commit journal, oldest first, keeping only file
 // changes under roots.
-func (s *Server) harnessCommits(ctx context.Context, roots []string) ([]harnessCommit, []CommitRecord, error) {
+func (s *Server) harnessCommits(ctx context.Context, scope HistoryQuery) ([]harnessCommit, []CommitRecord, error) {
 	if s.historyPath == "" {
 		return nil, nil, nil
 	}
@@ -81,7 +81,7 @@ func (s *Server) harnessCommits(ctx context.Context, roots []string) ([]harnessC
 			if leaf.Action != vfs.ChangeActionWrite && leaf.Action != vfs.ChangeActionRemove && leaf.Action != vfs.ChangeActionRemoveAll {
 				continue
 			}
-			if !historyReadable(roots, leaf.Target) {
+			if !historyReadable(scope.Roots, scope.Boundaries, leaf.Target) {
 				continue
 			}
 			commit.Files = append(commit.Files, harnessFileChange{Path: leaf.Target, Action: string(leaf.Action), BeforeExists: leaf.BeforeExists, BeforeHash: leaf.BeforeHash, AfterHash: leaf.AfterHash})
@@ -100,7 +100,7 @@ func (s *Server) harnessChanges(w http.ResponseWriter, r *http.Request, id Ident
 		harnessJSON(w, http.StatusOK, map[string]any{"available": false, "entries": []any{}})
 		return
 	}
-	commits, _, err := s.harnessCommits(r.Context(), historyRoots(s.sessionDocsets(id)))
+	commits, _, err := s.harnessCommits(r.Context(), s.historyFor(id, HistoryQuery{}))
 	if err != nil {
 		harnessError(w, http.StatusServiceUnavailable, "history unavailable")
 		return
@@ -131,7 +131,7 @@ func (s *Server) harnessBlob(w http.ResponseWriter, r *http.Request, id Identity
 		harnessError(w, http.StatusBadRequest, "path and hash are required")
 		return
 	}
-	commits, records, err := s.harnessCommits(r.Context(), historyRoots(s.sessionDocsets(id)))
+	commits, records, err := s.harnessCommits(r.Context(), s.historyFor(id, HistoryQuery{}))
 	if err != nil {
 		harnessError(w, http.StatusServiceUnavailable, "history unavailable")
 		return

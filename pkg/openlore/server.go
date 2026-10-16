@@ -1128,6 +1128,9 @@ func (s *Server) resolveSessionIdentity(id Identity) Identity {
 			id.policySnapshot = &policy
 			id.HomeDocset = policy.HomeDocset
 			id.HomeDir = s.resolveHomeDir(policy.HomeDocset)
+			if id.HomeDir == "" {
+				id.HomeDir = s.homeFolder(id) // $HOME: their own folder in /home (harness_homes.go)
+			}
 		} else {
 			deny := AuthorizationPolicy{}
 			id.policySnapshot = &deny
@@ -1142,6 +1145,9 @@ func (s *Server) buildSessionShell(id Identity) *shell.Shell {
 			id.policySnapshot = &policy
 			id.HomeDocset = policy.HomeDocset
 			id.HomeDir = s.resolveHomeDir(policy.HomeDocset)
+			if id.HomeDir == "" {
+				id.HomeDir = s.homeFolder(id) // $HOME: their own folder in /home (harness_homes.go)
+			}
 		} else {
 			deny := AuthorizationPolicy{}
 			id.policySnapshot = &deny
@@ -1289,7 +1295,8 @@ func (s *Server) buildSessionShell(id Identity) *shell.Shell {
 		sh.SetConfigReloadBackend(s)
 	}
 	if s.history != nil {
-		history := scopedHistory{store: s.history, roots: historyRoots(s.sessionDocsets(id))}
+		scope := s.historyFor(id, HistoryQuery{})
+		history := scopedHistory{store: s.history, roots: scope.Roots, boundaries: scope.Boundaries}
 		if canAdmin && s.writeLog != nil {
 			historyDir := filepath.Join(s.config.DataDir, "history")
 			if s.config.DataDir == "" {
@@ -1852,7 +1859,7 @@ func (s *Server) ListenAndServe() error {
 					if !ok {
 						id = s.anonymousIdentity()
 					}
-					page, err := s.history.Query(context.Background(), HistoryQuery{FileKey: filePath, Roots: historyRoots(s.sessionDocsets(id))})
+					page, err := s.history.Query(context.Background(), s.historyFor(id, HistoryQuery{FileKey: filePath}))
 					if err != nil {
 						return nil, err
 					}

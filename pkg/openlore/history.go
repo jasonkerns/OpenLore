@@ -39,8 +39,13 @@ type HistoryRecord struct {
 // opaque to callers so another HistoryStore implementation can use database
 // keys rather than the JSONL offset used by the local store.
 type HistoryQuery struct {
-	FileKey   string
-	Roots     []string
+	FileKey string
+	Roots   []string
+	// Boundaries are the roots of every docset. A change is visible only when the most specific root covering it is
+	// at least as specific as the most specific boundary covering it, as the read-scoped filesystem decides
+	// (scopedReadFS.within): a nested docset, or someone else's folder in /home, is carved out of an ancestor root.
+	// Empty: Roots alone decide.
+	Boundaries []string
 	Principal string
 	Actor     string
 	// AgentID keeps only changes made by that Agent Harness agent.
@@ -293,7 +298,7 @@ func appendHistoryRecords(path string, records []HistoryRecord) error {
 func (s *JSONLHistoryStore) Query(_ context.Context, query HistoryQuery) (HistoryPage, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if query.FileKey != "" && !historyReadable(query.Roots, query.FileKey) {
+	if query.FileKey != "" && !historyReadable(query.Roots, query.Boundaries, query.FileKey) {
 		return HistoryPage{}, nil
 	}
 	path := filepath.Join(s.dir, "events.jsonl")
@@ -320,7 +325,7 @@ func (s *JSONLHistoryStore) Query(_ context.Context, query HistoryQuery) (Histor
 		if query.FileKey != "" && record.FileKey != vfs.CleanPath(query.FileKey) {
 			continue
 		}
-		if !historyReadable(query.Roots, record.FileKey) || query.Principal != "" && record.Attribution.Principal != query.Principal || query.Actor != "" && record.Attribution.Actor != query.Actor || query.AgentID != "" && record.Attribution.AgentID != query.AgentID {
+		if !historyReadable(query.Roots, query.Boundaries, record.FileKey) || query.Principal != "" && record.Attribution.Principal != query.Principal || query.Actor != "" && record.Attribution.Actor != query.Actor || query.AgentID != "" && record.Attribution.AgentID != query.AgentID {
 			continue
 		}
 		matches = append(matches, record)
@@ -403,18 +408,28 @@ func historyRoots(docsets []cmds.DocsetInfo) []string {
 	return roots
 }
 
-func historyReadable(roots []string, target string) bool {
+func historyReadable(roots, boundaries []string, target string) bool {
+	best := -1
 	for _, root := range roots {
-		if pathWithinRoot(root, target) {
-			return true
+		if pathWithinRoot(root, target) && len(root) > best {
+			best = len(root)
 		}
 	}
-	return false
+	if best < 0 {
+		return false
+	}
+	for _, boundary := range boundaries {
+		if pathWithinRoot(boundary, target) && len(boundary) > best {
+			return false // carved out by a more specific docset the roots don't cover
+		}
+	}
+	return true
 }
 
 type scopedHistory struct {
-	store     HistoryStore
-	roots     []string
+	store      HistoryStore
+	roots      []string
+	boundaries []string
 	gc        func(context.Context) (HistoryGCStats, error)
 	gcTimeout time.Duration
 }
@@ -438,7 +453,7 @@ func (h scopedHistory) GC() ([]byte, error) {
 
 func (h scopedHistory) Query(principal, actor string) ([]byte, error) {
 	var out []byte
-	query := HistoryQuery{Roots: h.roots, Principal: principal, Actor: actor}
+	query := HistoryQuery{Roots: h.roots, Boundaries: h.boundaries, Principal: principal, Actor: actor}
 	for {
 		page, err := h.store.Query(context.Background(), query)
 		if err != nil {

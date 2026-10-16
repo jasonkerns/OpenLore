@@ -449,6 +449,9 @@ func (s *Server) grantsForPath(id Identity, p string) (config.DocsetSpec, []Gran
 	if !ok {
 		return config.DocsetSpec{}, nil, false
 	}
+	if name == harnessHomesDocset && !s.ownsHomePath(id, p) {
+		return config.DocsetSpec{}, nil, false // someone else's folder in /home, or /home itself (harness_homes.go)
+	}
 	grantNames, ok := s.effectiveGrantNames(id, name)
 	if !ok {
 		return config.DocsetSpec{}, nil, false // carved out: no grant on the governing docset
@@ -580,6 +583,12 @@ func (s *Server) readableRoots(id Identity) []string {
 		}
 		for _, pm := range ds.Paths {
 			root := displayPath(pm)
+			if isHomesRoot(name, root) {
+				// Only the identity's own folder in /home (harness_homes.go).
+				if root = s.homeFolder(id); root == "" {
+					continue
+				}
+			}
 			readable := false
 			for _, grantName := range grantNames {
 				if grant, ok := s.grants.get(grantName); ok && grant.CanRead(ds, root) {

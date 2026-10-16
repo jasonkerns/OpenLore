@@ -17,6 +17,7 @@ identity.
 | `port: 0` turns SSH off; the server then runs HTTP(S) only | `internal/config/config.go`, `pkg/openlore/server.go`, `internal/httpserver` |
 | `lore.json` is re-read when it changes on disk (every 2 s), so adding or removing an identity or delegate takes effect without a restart | `pkg/openlore/auth_watch.go` |
 | `openlore harness init` / `setup-code`: first-run setup, the starter folder layout and setup codes (below) | `cmd/openlore/harness_cmd.go`, `harness_layout.go` |
+| Private folders: one `homes` docset at `/home`, and `/home/<identity>` belongs to that identity alone. `readableRoots` gives each identity only its own folder, `grantsForPath` grants nothing in anyone else's (so writes and analytics stop there), `$HOME` is it, and history and the change feed are scoped like reads (`HistoryQuery.Boundaries`: a nested docset, or someone else's folder, is carved out of an ancestor root, which also fixes history showing changes in nested docsets a caller can't read). Admins included. Folders are made when a person is added and by `harness init` | `pkg/openlore/harness_homes.go`, `authz.go`, `history.go`, `cmd/openlore/harness_layout.go` |
 | The `/harness` API: people, agent activity, passkey links, health check, the change feed, file versions and compare-and-swap editing (below) | `pkg/openlore/harness_admin.go`, `harness_changes.go` |
 | Identity names may contain `@` (people are named by email); `/` stays reserved | `internal/config/config.go` |
 | `X-Harness-Agent` / `X-Harness-Agent-Id` on a request are recorded as `Attribution.Agent`/`AgentID`: a label, never authority, shown in history as `email:agent` (`Attribution.Label`), over MCP, `/api` and `/harness` (the app labels its own writes for an agent, such as copied OpenSpec documents); `String` is unchanged because folder rules and session binding match on it | `pkg/openlore/middleware.go`, `auth_middleware.go`, `harness_admin.go`, `history.go` |
@@ -45,6 +46,13 @@ the `openlore` binary is where the rules are enforced.
   so on storage without them (Windows, probably EFS) it answers `unsupported` and the app copies the skills without it).
   The config allows scripts (`.sh`, `.ps1`, `.py`, …) besides upstream's default file types, since skills carry them. Agent Harness will give each kind of folder its own menu, by path. Plan:
   `docs/openspec-lore-plan.md` in the harness.
+- **Private folders.** Each person has `/home/<email>/`, which only they (and their agents) can see or change; nobody
+  else sees it, its name included, admins too. Docsets can't change while the server runs, so it's one `homes` docset
+  with a per-identity rule rather than a docset each (`pkg/openlore/harness_homes.go`); adding someone needs no
+  restart. `harness init` writes it for new servers, adds it to an older `lore.json` (it runs before every start), and
+  makes `/home` and everyone's folder; `POST /harness/people` makes the new person's. Removing a person leaves their
+  folder on disk, out of everyone's reach (re-adding the same email gives it back). Agent Harness keeps agents'
+  memories and hand-off notes there.
 - **Joining.** Pasting the setup code into the app's Settings → Knowledge base, with your email, makes you an admin:
   the app calls `POST /harness/people` with the bootstrap token (or `…/code` if you're already there) and keeps only
   your own one-year token. Admins add people (each gets a **connection code**, `olpair1.` + address, token and

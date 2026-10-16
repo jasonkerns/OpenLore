@@ -631,7 +631,7 @@ func (s *Server) dashboardHistory(w http.ResponseWriter, r *http.Request) {
 	entries := make([]passkeys.FileHistoryEntry, 0)
 	result := map[string]any{"available": s.history != nil, "entries": entries}
 	if s.history != nil {
-		page, err := s.history.Query(r.Context(), HistoryQuery{FileKey: target, Roots: historyRoots(s.sessionDocsets(id)), Limit: 100, Cursor: r.URL.Query().Get("cursor")})
+		page, err := s.history.Query(r.Context(), s.historyFor(id, HistoryQuery{FileKey: target, Limit: 100, Cursor: r.URL.Query().Get("cursor")}))
 		if err != nil {
 			dashboardError(w, http.StatusServiceUnavailable, "timeline unavailable")
 			return

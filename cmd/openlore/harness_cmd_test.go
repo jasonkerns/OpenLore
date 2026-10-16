@@ -96,3 +96,43 @@ func TestHarnessInit(t *testing.T) {
 		t.Fatal("init accepted a plain-http public URL")
 	}
 }
+
+func TestHarnessInitAddsPrivateFolders(t *testing.T) {
+	dir := t.TempDir()
+	var out, errOut bytes.Buffer
+	if code := runHarness([]string{"init", "--dir", dir, "--url", "https://lore.test"}, &out, &errOut); code != 0 {
+		t.Fatalf("init: %s", errOut.String())
+	}
+	authPath := filepath.Join(dir, "config", "lore.json")
+	cfg, err := config.LoadAuthConfig(authPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := cfg.Docsets["homes"]; !ok {
+		t.Fatal("a new server has no homes docset")
+	}
+
+	// A server set up before private folders: no homes docset, and someone already there.
+	var auth map[string]any
+	raw, _ := os.ReadFile(authPath)
+	_ = json.Unmarshal(raw, &auth)
+	delete(auth["docsets"].(map[string]any), "homes")
+	auth["identities"] = append(auth["identities"].([]any), map[string]any{"name": "jk@test.com", "roles": []string{"member"}})
+	b, _ := json.Marshal(auth)
+	if err := os.WriteFile(authPath, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	if code := runHarness([]string{"init", "--dir", dir, "--url", "https://lore.test"}, &out, &errOut); code != 0 {
+		t.Fatalf("second init: %s", errOut.String())
+	}
+	if !strings.Contains(out.String(), "Added private folders") {
+		t.Fatalf("output: %s", out.String())
+	}
+	if cfg, err = config.LoadAuthConfig(authPath); err != nil || cfg.Docsets["homes"].Paths[0].Display != "/home" {
+		t.Fatalf("homes docset not added: %v %+v", err, cfg.Docsets["homes"])
+	}
+	if info, err := os.Stat(filepath.Join(dir, "docs", "home", "jk@test.com")); err != nil || !info.IsDir() {
+		t.Fatalf("no folder for jk@test.com: %v", err)
+	}
+}

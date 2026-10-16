@@ -181,6 +181,7 @@ func (s *Server) harnessAddPerson(w http.ResponseWriter, r *http.Request, id Ide
 		harnessError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	s.makeHomeFolder(email)
 	s.harnessIssue(w, http.StatusCreated, harnessPerson{Email: email, Admin: body.Admin})
 }
 
@@ -266,13 +267,12 @@ func (s *Server) harnessActivity(w http.ResponseWriter, r *http.Request, id Iden
 		harnessJSON(w, http.StatusOK, map[string]any{"available": false, "entries": []any{}})
 		return
 	}
-	page, err := s.history.Query(r.Context(), HistoryQuery{
-		Roots:     historyRoots(s.sessionDocsets(id)),
+	page, err := s.history.Query(r.Context(), s.historyFor(id, HistoryQuery{
 		Principal: id.Attribution.Principal,
 		AgentID:   agent,
 		Limit:     100,
 		Cursor:    r.URL.Query().Get("cursor"),
-	})
+	}))
 	if err != nil {
 		harnessError(w, http.StatusServiceUnavailable, "history unavailable")
 		return

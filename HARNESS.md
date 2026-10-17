@@ -97,7 +97,7 @@ the proxy. The first run prints a setup code for connecting a local Agent Harnes
 `buildspec.yml` (CodeBuild: build and push to ECR). Plan for ECS Fargate: one task (state is files, so never more than
 one), an EFS volume at `/data` (access point uid/gid 1000), an ALB with an ACM certificate for the public name
 (Route 53) forwarding to port 8080, health check `/harness/health`. The first start's setup code appears in the
-task's log.
+task's log. Step-by-step console instructions, and where the data lives and how it's backed up: `deploy/aws/FARGATE.md`.
 
 ## Tests
 

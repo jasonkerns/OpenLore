@@ -7,9 +7,22 @@ what the one before made.
 **Before you start**
 
 - The image is in ECR (`<account>.dkr.ecr.<region>.amazonaws.com/openlore:latest`), built with `--platform linux/amd64`.
+  To build and push from a repo checkout:
+
+  ```sh
+  aws ecr create-repository --repository-name openlore          # first time only
+  docker build --platform linux/amd64 -f deploy/aws/Dockerfile -t <account>.dkr.ecr.<region>.amazonaws.com/openlore:latest .
+  aws ecr get-login-password --region <region> | docker login --username AWS --password-stdin <account>.dkr.ecr.<region>.amazonaws.com
+  docker push <account>.dkr.ecr.<region>.amazonaws.com/openlore:latest
+  ```
+
 - A domain in Route 53 (a hosted zone), and the name you'll use, e.g. `lore.example.com`. Below it's **lore.example.com**.
 - Everything in **one region** (the ECR repository's). The default VPC is fine: it has a public subnet in each
   Availability Zone.
+- Shell scripts must have **LF** line endings. The repo's `.gitattributes` enforces this for `*.sh`; without it a
+  Windows checkout gives `start.sh` CRLF endings and the container exits at once with
+  `exec /usr/local/bin/openlore-start: no such file or directory`. If you see that, re-checkout after adding
+  `.gitattributes` (or run `dos2unix deploy/aws/start.sh`) and rebuild.
 
 ## 1. Security groups (VPC → Security groups → Create)
 
@@ -111,8 +124,14 @@ Name `openlore`, infrastructure **AWS Fargate** only → Create.
    Add everyone else from there (each gets their own connection code).
 4. Check: `https://lore.example.com/harness/health` answers OK, and the target group shows the target **healthy**.
 
-If the hour runs out before anyone has joined, get a new code with step 11 (restarting the task doesn't print a new
-one: the config already exists).
+The log banner also prints a **passkey "browser sign-in"** path. That is an alternative for the web dashboard; the
+Agent Harness client uses the `olsetup1.` code, so paste that and ignore the passkey steps unless you specifically want
+dashboard passkey login.
+
+The code is only printed on the **first** start of a *truly empty* volume. If an earlier boot got far enough to write
+`lore.json` (e.g. it crash-looped on another error), later starts log `Already set up` instead of a code — the volume
+is initialized, it just never surfaced one. Mint a fresh code with step 11 (this is also how you recover if the hour
+runs out before anyone joined — restarting the task does not print a new one).
 
 ## 11. Optional: a shell in the task (ECS Exec), for a new setup code
 
@@ -128,6 +147,26 @@ one: the config already exists).
    aws ecs execute-command --cluster openlore --task <task id> --container openlore --interactive \
      --command "openlore harness setup-code --config /data/openlore.yml"
    ```
+
+### A new setup code without the Session Manager plugin
+
+If you don't have ECS Exec set up (or the Session Manager plugin installed), run a **one-off task** that overrides the
+entrypoint to print a code, then read it from the log group. It mounts the same EFS volume, so it reads the same config
+and owner. See `deploy/aws/openspec-setupcode-taskdef.json` for a ready-made definition (same image, EFS volume and
+execution role; `entryPoint: ["openlore"]`, `command: ["harness","setup-code","--config","/data/openlore.yml"]`).
+
+```sh
+aws ecs register-task-definition --cli-input-json file://deploy/aws/openspec-setupcode-taskdef.json
+TASK=$(aws ecs run-task --cluster openlore --launch-type FARGATE --task-definition openspec-setupcode \
+  --network-configuration "awsvpcConfiguration={subnets=[<subnet-a>,<subnet-b>],securityGroups=[<task-sg>],assignPublicIp=ENABLED}" \
+  --query "tasks[0].taskArn" --output text)
+# wait ~30s for it to run and stop, then:
+aws logs get-log-events --log-group-name /ecs/openlore \
+  --log-stream-name "setup/openspec-setupcode/${TASK##*/}" --start-from-head \
+  --query "events[].message" --output text
+```
+
+The `olsetup1.` code is a full-scope owner token — treat it like a password and don't commit it.
 
 ## Updating to a new image
 

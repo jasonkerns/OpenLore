@@ -1,0 +1,6 @@
+# Shell scripts must use LF so they run inside Linux containers.
+# Without this, a Windows checkout gives start.sh CRLF endings and the
+# container entrypoint fails with "exec .../openlore-start: no such file or directory".
+*.sh text eol=lf
+deploy/**/start.sh text eol=lf
+Dockerfile text eol=lf

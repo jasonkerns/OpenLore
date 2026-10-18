@@ -1,0 +1,46 @@
+{
+  "family": "openspec",
+  "requiresCompatibilities": ["FARGATE"],
+  "networkMode": "awsvpc",
+  "cpu": "512",
+  "memory": "1024",
+  "runtimePlatform": { "operatingSystemFamily": "LINUX", "cpuArchitecture": "X86_64" },
+  "executionRoleArn": "arn:aws:iam::530733533303:role/ecsTaskExecutionRole",
+  "containerDefinitions": [
+    {
+      "name": "openspec",
+      "image": "530733533303.dkr.ecr.us-east-1.amazonaws.com/openspec:latest",
+      "essential": true,
+      "portMappings": [
+        { "containerPort": 8080, "protocol": "tcp", "appProtocol": "http" }
+      ],
+      "environment": [
+        { "name": "OPENLORE_URL", "value": "https://docs.development.healthyroster.com" }
+      ],
+      "mountPoints": [
+        { "sourceVolume": "data", "containerPath": "/data", "readOnly": false }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/openspec",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "ecs"
+        }
+      }
+    }
+  ],
+  "volumes": [
+    {
+      "name": "data",
+      "efsVolumeConfiguration": {
+        "fileSystemId": "fs-09d0ff58ec048819c",
+        "transitEncryption": "ENABLED",
+        "authorizationConfig": {
+          "accessPointId": "fsap-0af965cbfea70eaac",
+          "iam": "DISABLED"
+        }
+      }
+    }
+  ]
+}

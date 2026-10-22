@@ -919,28 +919,70 @@ func (s *Shell) expandParam(pe *parser.ParamExp) string {
 	return val
 }
 
-// globExpand expands a glob pattern against the virtual filesystem.
+// globExpand expands a glob pattern against the virtual filesystem. Any part
+// of the path may hold wildcards (specs/*/spec.md), as in bash.
 func (s *Shell) globExpand(pattern string) []string {
-	dir := path.Dir(s.Resolve(pattern))
-	base := path.Base(pattern)
-
-	entries, err := s.fs.ReadDir(dir)
-	if err != nil {
-		return nil
-	}
-
-	var matches []string
-	for _, entry := range entries {
-		if strings.HasPrefix(entry.FileName, ".") && !strings.HasPrefix(base, ".") {
+	resolved := s.Resolve(pattern)
+	parts := strings.Split(strings.TrimPrefix(resolved, "/"), "/")
+	matches := []string{"/"}
+	for _, part := range parts {
+		if part == "" {
 			continue
 		}
-		matched, _ := path.Match(base, entry.FileName)
-		if matched {
-			matches = append(matches, path.Join(dir, entry.FileName))
+		var next []string
+		for _, dir := range matches {
+			if !hasGlobMeta(part) {
+				candidate := path.Join(dir, unescapeGlob(part))
+				if _, err := s.fs.Stat(candidate); err == nil {
+					next = append(next, candidate)
+				}
+				continue
+			}
+			entries, err := s.fs.ReadDir(dir)
+			if err != nil {
+				continue
+			}
+			for _, entry := range entries {
+				if strings.HasPrefix(entry.FileName, ".") && !strings.HasPrefix(part, ".") {
+					continue
+				}
+				if matched, _ := path.Match(part, entry.FileName); matched {
+					next = append(next, path.Join(dir, entry.FileName))
+				}
+			}
+		}
+		matches = next
+		if len(matches) == 0 {
+			return nil
 		}
 	}
 	sort.Strings(matches)
 	return matches
+}
+
+// hasGlobMeta reports whether a path segment holds an unescaped wildcard.
+func hasGlobMeta(segment string) bool {
+	for i := 0; i < len(segment); i++ {
+		switch segment[i] {
+		case '\\':
+			i++
+		case '*', '?', '[':
+			return true
+		}
+	}
+	return false
+}
+
+// unescapeGlob drops the backslashes escapeGlobPattern added.
+func unescapeGlob(segment string) string {
+	var b strings.Builder
+	for i := 0; i < len(segment); i++ {
+		if segment[i] == '\\' && i+1 < len(segment) {
+			i++
+		}
+		b.WriteByte(segment[i])
+	}
+	return b.String()
 }
 
 // InteractiveOptions describes terminal properties used by the interactive

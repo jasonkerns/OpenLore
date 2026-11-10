@@ -20,6 +20,7 @@ identity.
 | Private folders: one `homes` docset at `/home`, and `/home/<identity>` belongs to that identity alone. `readableRoots` gives each identity only its own folder, `grantsForPath` grants nothing in anyone else's (so writes and analytics stop there), `$HOME` is it, and history and the change feed are scoped like reads (`HistoryQuery.Boundaries`: a nested docset, or someone else's folder, is carved out of an ancestor root, which also fixes history showing changes in nested docsets a caller can't read). Admins included. Folders are made when a person is added and by `harness init` | `pkg/openlore/harness_homes.go`, `authz.go`, `history.go`, `cmd/openlore/harness_layout.go` |
 | The `/harness` API: people, agent activity, passkey links, health check, the change feed, file versions and compare-and-swap editing (below) | `pkg/openlore/harness_admin.go`, `harness_changes.go` |
 | Identity names may contain `@` (people are named by email); `/` stays reserved | `internal/config/config.go` |
+| `openlore harness backup [--dir <dir>] [--out <file>]` writes one `.tar.gz` of the server's folder (openlore.yml, `config/`, `data/` except `data/analytics`, `docs/`) with a manifest, safely while the server runs (history copied before docs, `.jsonl` logs cut at their last full line, temp and lock files skipped). `openlore harness restore --from <file> [--dir <dir>] [--check] [--force]` checks the whole archive first, refuses while something answers on the server's port, moves the current files to `<dir>/pre-restore-<time>/`, unpacks, and repoints openlore.yml if the folder changed. Extended attributes (the `/skills` collection marker) aren't kept. On AWS: `deploy/aws/FARGATE.md` | `cmd/openlore/harness_backup.go`, `deploy/aws/start.sh` |
 | `X-Harness-Agent` / `X-Harness-Agent-Id` on a request are recorded as `Attribution.Agent`/`AgentID`: a label, never authority, shown in history as `email:agent` (`Attribution.Label`), over MCP, `/api` and `/harness` (the app labels its own writes for an agent, such as copied OpenSpec documents); `String` is unchanged because folder rules and session binding match on it | `pkg/openlore/middleware.go`, `auth_middleware.go`, `harness_admin.go`, `history.go` |
 | `openlore token mint --actor <identity>` mints a delegated token (the actor must be one of the principal's `delegates`) | `cmd/openlore/main.go` |
 | `openlore tls cert --cert … --key … --hosts …` writes a self-signed certificate and prints its SHA-256 fingerprint, for HTTPS on a private network where clients pin the certificate | `cmd/openlore/tls_cmd.go` |
@@ -81,6 +82,7 @@ Bearer tokens only (no cookies, so no CSRF). "Admin" means the caller has `lore:
 | `GET /harness/file?path=` | any identity | a document's text and hash, the base for an edit |
 | `PUT /harness/file?path=` | anyone who may write there | saves the body; needs `If-Match: <hash>` (replace that version) or `If-None-Match: *` (create; parent folders are made); 412 with the current hash if it changed; goes through the write log, so history, rules and attribution apply |
 | `DELETE /harness/file?path=` | anyone who may write there | removes the document if it's still `If-Match` |
+| `GET /harness/backup` | admin, not an agent | a backup of the whole server (the archive `harness backup` writes), as a download; 403 unless the server runs with `OPENLORE_BACKUP_DOWNLOAD=1` (`/harness/me` says `backup: true` when it does); each download is logged with who made it. It holds everyone's private folders and the signing key, which is why it's off by default |
 
 ## Development
 
@@ -103,7 +105,7 @@ task's log. Step-by-step console instructions, and where the data lives and how 
 
 `go test ./...`. On Windows about 120 upstream tests fail on `main` as well (Unix file modes, xattrs, path handling,
 directory sync); compare against `main` rather than expecting a clean run. The tests for these changes are in
-`cmd/openlore/locked_test.go`, `cmd/openlore/harness_cmd_test.go`, `pkg/openlore/harness_admin_test.go`,
+`cmd/openlore/locked_test.go`, `cmd/openlore/harness_cmd_test.go`, `cmd/openlore/harness_backup_test.go`, `pkg/openlore/harness_admin_test.go`,
 `internal/passkeys/harness_test.go`, `pkg/openlore/authorize_test.go` (`TestAuthorize_NoPublicAccess`),
 `auth_middleware_test.go` (`TestAuthMiddleware_AnonymousTokenIsRefused`) and `internal/config/documented_keys_test.go`.
 

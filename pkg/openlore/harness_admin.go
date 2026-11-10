@@ -57,6 +57,7 @@ func (s *Server) harnessRoutes() HTTPRouteRegistrar {
 		mux.Handle("DELETE /harness/people/{email}", s.harnessAuth(true, s.harnessRemovePerson))
 		mux.Handle("POST /harness/passkey", s.harnessAuth(true, s.harnessPasskeyLink))
 		mux.Handle("POST /harness/folder", s.harnessAuth(false, s.harnessMakeFolder))
+		mux.Handle("GET /harness/backup", s.harnessAuth(true, s.harnessBackup))
 		s.harnessChangeRoutes(mux)
 	}
 }
@@ -126,6 +127,7 @@ func (s *Server) harnessMe(w http.ResponseWriter, _ *http.Request, id Identity) 
 		"actor":     id.Attribution.Actor,
 		"admin":     s.harnessIsAdmin(id),
 		"passkeys":  s.passkeys != nil,
+		"backup":    harnessBackupEnabled(), // GET /harness/backup is on (admins only)
 	})
 }
 

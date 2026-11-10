@@ -22,6 +22,7 @@ import (
 //
 //	openlore harness init --dir <dir> --url <public URL> [--owner <name>] [--http-port <port>]
 //	openlore harness setup-code [--config <dir>/openlore.yml] [--ttl 1h]
+//	openlore harness backup / restore (harness_backup.go)
 //
 // init writes a locked-down openlore.yml and lore.json (only if they don't
 // exist yet) and an empty docs folder. The first time, it also prints a setup
@@ -31,7 +32,7 @@ import (
 // machine). A setup code is the owner's own token, so it expires quickly.
 func runHarness(args []string, stdout, stderr io.Writer) int {
 	usage := func() int {
-		fmt.Fprintln(stderr, "Usage:\n  openlore harness init --dir <dir> --url <public URL> [--owner <name>] [--http-port <port>]\n  openlore harness setup-code [--config <file>] [--ttl 1h]")
+		fmt.Fprintln(stderr, "Usage:\n  openlore harness init --dir <dir> --url <public URL> [--owner <name>] [--http-port <port>]\n  openlore harness setup-code [--config <file>] [--ttl 1h]\n  openlore harness backup [--dir <dir>] [--out <file.tar.gz>]\n  openlore harness restore --from <file.tar.gz> [--dir <dir>] [--check] [--force]")
 		return 2
 	}
 	if len(args) == 0 {
@@ -49,6 +50,10 @@ func runHarness(args []string, stdout, stderr io.Writer) int {
 			return 2
 		}
 		return printSetupCode(*configPath, *ttl, stdout, stderr)
+	case "backup":
+		return harnessBackup(args[1:], stdout, stderr)
+	case "restore":
+		return harnessRestore(args[1:], stdout, stderr)
 	default:
 		return usage()
 	}

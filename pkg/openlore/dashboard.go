@@ -221,10 +221,12 @@ type dashboardNode struct {
 	Tokens     int64                     `json:"tokens"`
 	Children   []*dashboardNode          `json:"children,omitempty"`
 	Analytics  *analytics.SnapshotStatus `json:"analytics,omitempty"`
+	// Writable (tree listings only): whether the caller may move, rename or delete it.
+	Writable bool `json:"writable,omitempty"`
 }
 
 func (s *Server) dashboardTree(w http.ResponseWriter, r *http.Request) {
-	_, scoped, target := s.dashboardPath(r)
+	id, scoped, target := s.dashboardPath(r)
 	entries, err := scoped.ReadDir(target)
 	if err != nil {
 		dashboardError(w, http.StatusNotFound, "folder unavailable")
@@ -238,7 +240,8 @@ func (s *Server) dashboardTree(w http.ResponseWriter, r *http.Request) {
 	})
 	nodes := make([]dashboardNode, 0, len(entries))
 	for _, entry := range entries {
-		nodes = append(nodes, dashboardNode{Path: path.Join(target, entry.Name()), Name: entry.Name(), Directory: entry.Dir, Bytes: entry.Size()})
+		p := path.Join(target, entry.Name())
+		nodes = append(nodes, dashboardNode{Path: p, Name: entry.Name(), Directory: entry.Dir, Bytes: entry.Size(), Writable: s.harnessWritable(id, p)})
 	}
 	dashboardJSON(w, map[string]any{"path": target, "entries": nodes})
 }

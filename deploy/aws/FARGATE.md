@@ -204,6 +204,17 @@ Worth considering:
   kept 90 days plus monthly kept a year).
 - **Protection against deletion**: EFS has no "deletion protection" switch. Limit who can delete it with IAM, and
   for a backup that can't be removed early, use a backup vault with **Vault Lock**.
+- **A portable backup** (one file you can keep anywhere, restore on any machine or a new file system): from a shell
+  in the running task (ECS Exec, step 11), `openlore harness backup --dir /data --out /data/backups/<name>.tar.gz`. It
+  is safe while the server runs and holds everything above except analytics. To restore one: set the service's
+  desired tasks to **0**, then **Run new task** with the `openlore` task definition and a container **command
+  override** of `harness,restore,--dir,/data,--from,/data/backups/<name>.tar.gz`; when it has stopped (its log says
+  *Restored*), set desired tasks back to 1. What was there before is kept in `/data/pre-restore-<time>/`; delete it
+  once you're happy. `harness restore --check --from <file>` only reads a backup and says what's in it.
+- **Backups from the app**: add the environment variable `OPENLORE_BACKUP_DOWNLOAD` = `1` to the task definition
+  (step 8) and admins get **Download backup** in Agent Harness → Settings → Knowledge base: the same archive, saved on
+  their computer. It contains everyone's private folders and the signing key, so an admin's code becomes a key to all
+  of it; leave it off if that's not what you want.
 - **A copy outside AWS**: the documents are plain files, so a scheduled job (or an agent) can also copy `docs/` to a
   git repository. The history and the people (config, auth) are only in the EFS backups.
 - The backups contain the token-signing key and access settings: treat them, and who can restore them, as sensitive.

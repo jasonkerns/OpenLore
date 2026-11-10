@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"net/http"
@@ -51,6 +53,8 @@ func (s *Server) harnessChangeRoutes(mux *http.ServeMux) {
 	mux.Handle("GET /harness/file", s.harnessAuth(false, s.harnessReadFile))
 	mux.Handle("PUT /harness/file", s.harnessAuth(false, s.harnessWriteFile))
 	mux.Handle("DELETE /harness/file", s.harnessAuth(false, s.harnessDeleteFile))
+	mux.Handle("POST /harness/move", s.harnessAuth(false, s.harnessMove))
+	mux.Handle("POST /harness/delete", s.harnessAuth(false, s.harnessDelete))
 }
 
 // harnessCommits reads the commit journal, oldest first, keeping only file
@@ -289,6 +293,194 @@ func (s *Server) harnessDeleteFile(w http.ResponseWriter, r *http.Request, id Id
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// Limits on one move or delete, which commits as a single batch.
+const (
+	harnessMaxMoveFiles = 2000
+	harnessMaxMoveBytes = 100 << 20
+)
+
+var errHarnessMoveTooBig = errors.New("too much to change at once")
+
+// harnessTreeBatch builds the batch that removes from (a document, or a folder
+// and everything in it) and, when to is set, first writes it all there (each
+// file's write paired with its removal as a move). Every removal is
+// compare-and-swap on what was read, and emptied folders go last, deepest
+// first, so a folder holding anything this caller can't see stays and the
+// whole batch rolls back.
+func harnessTreeBatch(fsys vfs.FileSystem, from, to string, dir bool) (vfs.ChangeSet, int, error) {
+	var changes []vfs.Change
+	var moves []vfs.Move
+	var folders []string
+	files, size := 0, 0
+	var walk func(src, dst string, dir bool) error
+	walk = func(src, dst string, dir bool) error {
+		if dir {
+			if to != "" {
+				changes = append(changes, vfs.Change{Target: dst, Action: vfs.ChangeActionMkdirAll})
+			}
+			entries, err := fsys.ReadDir(src)
+			if err != nil {
+				return err
+			}
+			for _, entry := range entries {
+				if err := walk(path.Join(src, entry.Name()), path.Join(dst, entry.Name()), entry.IsDir()); err != nil {
+					return err
+				}
+			}
+			folders = append(folders, src)
+			return nil
+		}
+		data, err := fsys.ReadFile(src)
+		if err != nil {
+			return err
+		}
+		files++
+		size += len(data)
+		if files > harnessMaxMoveFiles || size > harnessMaxMoveBytes {
+			return errHarnessMoveTooBig
+		}
+		if to != "" {
+			changes = append(changes, vfs.Change{Target: dst, Action: vfs.ChangeActionWrite, Write: &vfs.WriteChange{Bytes: data, Opts: vfs.WriteOpts{IfNoneMatch: true}}})
+		}
+		snapshot := &vfs.TreeSnapshot{Root: src, Ops: []vfs.TreeOp{{RelPath: ".", Kind: "file", Hash: harnessHash(data), Size: int64(len(data))}}}
+		changes = append(changes, vfs.Change{Target: src, Action: vfs.ChangeActionRemoveAll, RemoveAll: &vfs.RemoveAllChange{Opts: vfs.RemoveOpts{Expected: snapshot}}})
+		if to != "" {
+			moves = append(moves, vfs.Move{From: len(changes) - 1, To: len(changes) - 2})
+		}
+		return nil
+	}
+	if parent := path.Dir(to); to != "" && !dir && parent != "/" {
+		changes = append(changes, vfs.Change{Target: parent, Action: vfs.ChangeActionMkdirAll})
+	}
+	if err := walk(from, to, dir); err != nil {
+		return vfs.ChangeSet{}, 0, err
+	}
+	for _, folder := range folders {
+		changes = append(changes, vfs.Change{Target: folder, Action: vfs.ChangeActionRemove})
+	}
+	return vfs.ChangeSet{Changes: changes, Moves: moves}, files, nil
+}
+
+// harnessMove moves a document, or a folder and everything in it, to a new
+// path (`{"from": ..., "to": ...}`, `to` being the new path itself, not the
+// folder it goes in), so it renames too. It commits as one batch through the
+// caller's normal permissions and the write log; if any part fails nothing
+// changes. It never overwrites.
+func (s *Server) harnessMove(w http.ResponseWriter, r *http.Request, id Identity) {
+	var body struct {
+		From string `json:"from"`
+		To   string `json:"to"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&body); err != nil || body.From == "" || body.To == "" {
+		harnessError(w, http.StatusBadRequest, "from and to are required")
+		return
+	}
+	from, to := s.canonicalPath(body.From), s.canonicalPath(body.To)
+	if from == "/" || to == "/" {
+		harnessError(w, http.StatusBadRequest, "the workspace itself can't be moved or replaced")
+		return
+	}
+	if from == to {
+		harnessJSON(w, http.StatusOK, map[string]any{"from": from, "to": to, "files": 0})
+		return
+	}
+	if strings.HasPrefix(to, from+"/") {
+		harnessError(w, http.StatusBadRequest, "a folder can't move inside itself")
+		return
+	}
+	fsys := s.buildCanonicalSessionFS(id)
+	info, err := fsys.Stat(from)
+	if err != nil {
+		harnessError(w, harnessStatus(err), "nothing to move at "+from)
+		return
+	}
+	if _, err := fsys.Stat(to); err == nil {
+		harnessJSON(w, http.StatusPreconditionFailed, map[string]any{"error": "something already exists at " + to})
+		return
+	}
+	s.harnessCommitTree(w, fsys, from, to, info.Dir, map[string]any{"from": from, "to": to})
+}
+
+// harnessDelete deletes a document, or a folder and everything in it
+// (`{"path": ...}`), as one batch: all of it or, if anything fails or changed
+// meanwhile, none of it.
+func (s *Server) harnessDelete(w http.ResponseWriter, r *http.Request, id Identity) {
+	var body struct {
+		Path string `json:"path"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&body); err != nil || body.Path == "" {
+		harnessError(w, http.StatusBadRequest, "path is required")
+		return
+	}
+	target := s.canonicalPath(body.Path)
+	if target == "/" {
+		harnessError(w, http.StatusBadRequest, "the workspace itself can't be deleted")
+		return
+	}
+	fsys := s.buildCanonicalSessionFS(id)
+	info, err := fsys.Stat(target)
+	if err != nil {
+		harnessError(w, harnessStatus(err), "nothing to delete at "+target)
+		return
+	}
+	s.harnessCommitTree(w, fsys, target, "", info.Dir, map[string]any{"path": target})
+}
+
+// harnessCommitTree builds and admits a move (to set) or delete batch, and answers with out plus the file count.
+func (s *Server) harnessCommitTree(w http.ResponseWriter, fsys vfs.FileSystem, from, to string, dir bool, out map[string]any) {
+	admitter, ok := fsys.(vfs.ChangeSetAdmitter)
+	if !ok {
+		harnessError(w, http.StatusForbidden, "this knowledge base is read-only for you")
+		return
+	}
+	cs, files, err := harnessTreeBatch(fsys, from, to, dir)
+	if err != nil {
+		if errors.Is(err, errHarnessMoveTooBig) {
+			harnessError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("one change is limited to %d files and %d MiB", harnessMaxMoveFiles, harnessMaxMoveBytes>>20))
+		} else {
+			harnessError(w, harnessStatus(err), "can't read "+from+": "+err.Error())
+		}
+		return
+	}
+	out["files"] = files
+	err = admitter.AdmitChangeSet(cs)
+	var pending *vfs.PendingChangeError
+	var stale *vfs.TreeStaleError
+	var exists *vfs.PreconditionError
+	switch {
+	case err == nil:
+		harnessJSON(w, http.StatusOK, out)
+	case errors.As(err, &pending):
+		out["pending"] = pending.Ref
+		harnessJSON(w, http.StatusAccepted, out)
+	case errors.As(err, &stale):
+		harnessJSON(w, http.StatusPreconditionFailed, map[string]any{"error": "something changed meanwhile; nothing was changed"})
+	case errors.As(err, &exists) && to != "":
+		harnessJSON(w, http.StatusPreconditionFailed, map[string]any{"error": "something already exists at " + to})
+	default:
+		harnessError(w, harnessStatus(err), err.Error())
+	}
+}
+
+// harnessWritable reports whether id may move, rename or delete the entry at
+// p: never a docset root or anything above one, otherwise the caller's normal
+// write permission there.
+func (s *Server) harnessWritable(id Identity, p string) bool {
+	if auth := s.currentAuth(); auth != nil {
+		for _, ds := range auth.Docsets {
+			for _, pm := range ds.Paths {
+				if pathWithinRoot(p, displayPath(pm)) { // p is the root or above it
+					return false
+				}
+			}
+		}
+	}
+	if !s.authEnforced {
+		return !s.config.Readonly
+	}
+	return s.identityCanWrite(id, vfs.ChangeActionRemove, p)
 }
 
 func (s *Server) harnessWriteError(w http.ResponseWriter, err error) {
